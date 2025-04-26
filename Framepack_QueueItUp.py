@@ -188,9 +188,9 @@ class Config:
 
 # Load settings at startup
 settings_config = load_settings()
-print ("settings_config = load_settings")
+
 Config = Config.from_settings(settings_config)
-print ("Config = Config.from_settingssettings_config")
+
 
 # Path to the quick prompts JSON file
 PROMPT_FILE = os.path.join(os.getcwd(), 'quick_prompts.json')
@@ -379,9 +379,15 @@ def save_image_to_temp(image: np.ndarray, job_id: str) -> str:
         if isinstance(image, str):
             # If it's a path, open the image
             pil_image = Image.open(image)
+            # Only convert if it's RGBA
+            if pil_image.mode == 'RGBA':
+                pil_image = pil_image.convert('RGB')
         else:
             # If it's already a numpy array
             pil_image = Image.fromarray(image)
+            # Only convert if it's RGBA
+            if pil_image.mode == 'RGBA':
+                pil_image = pil_image.convert('RGB')
             
         # Create unique filename using hex ID
         filename = f"queue_image_{job_id}.png"
@@ -580,7 +586,7 @@ def update_queue_table():
                 with open(job.thumbnail, "rb") as img_file:
                     import base64
                     img_data = base64.b64encode(img_file.read()).decode()
-                img_md = f'<div style="text-align: center; font-size: 0.8em; color: #666; margin-bottom: 5px;">{job.status}</div><div style="text-align: center; font-size: 0.8em; color: #666;">{job.job_id}</div><div style="text-align: center; font-size: 0.8em; color: #666;">Length: {job.video_length:.1f}s</div><img src="data:image/png;base64,{img_data}" alt="Input" style="max-width:150px; max-height:150px; display: block; margin: auto; object-fit: contain; transform: scale(0.75); transform-origin: top left;" />'
+                img_md = f'<div style="text-align: center; font-size: 0.8em; color: #666; margin-bottom: 5px;">{job.status}</div><div style="text-align: center; font-size: 0.8em; color: #666;">{job.job_id}</div><div style="text-align: center; font-size: 0.8em; color: #666;">Length: {job.video_length:.1f}s</div><img src="data:image/png;base64,{img_data}" alt="Input" style="max-width:100px; max-height:100px; display: block; margin: auto; object-fit: contain; transform: scale(0.75); transform-origin: top left;" />'
             except Exception as e:
                 print(f"Error converting image to base64: {str(e)}")
                 img_md = ""
@@ -1016,6 +1022,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
     total_latent_sections = int(max(round(total_latent_sections), 1))
 
     job_id = generate_timestamp()
+    job_failed = False  # Flag to track if job actually failed
 
     stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...'))))
 
@@ -1027,7 +1034,6 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             )
 
         # Text encoding
-
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Text encoding ...'))))
 
         if not high_vram:
@@ -1045,7 +1051,6 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         llama_vec_n, llama_attention_mask_n = crop_or_pad_yield_mask(llama_vec_n, length=512)
 
         # Processing input image
-
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Image processing ...'))))
 
         # Handle Gallery tuple format
@@ -1053,11 +1058,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             input_image = input_image[0]  # Get the file path from the tuple
         if isinstance(input_image, str):
             # If it's a path, open the image
-            input_image = np.array(Image.open(input_image))
+            input_image = np.array(Image.open(input_image))  # No RGB conversion
         elif isinstance(input_image, list):
             # If it's a list of tuples, get the first one
             if isinstance(input_image[0], tuple):
-                input_image = np.array(Image.open(input_image[0][0]))
+                input_image = np.array(Image.open(input_image[0][0]))  # No RGB conversion
             else:
                 # If it's already a numpy array
                 input_image = input_image[0]
@@ -1087,7 +1092,6 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         input_image_pt = input_image_pt.permute(2, 0, 1)[None, :, None]
 
         # VAE encoding
-
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'VAE encoding ...'))))
 
         if not high_vram:
@@ -1096,7 +1100,6 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         start_latent = vae_encode(input_image_pt, vae)
 
         # CLIP Vision
-
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'CLIP Vision encoding ...'))))
 
         if not high_vram:
@@ -1106,7 +1109,6 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         image_encoder_last_hidden_state = image_encoder_output.last_hidden_state
 
         # Dtype
-
         llama_vec = llama_vec.to(transformer.dtype)
         llama_vec_n = llama_vec_n.to(transformer.dtype)
         clip_l_pooler = clip_l_pooler.to(transformer.dtype)
@@ -1114,7 +1116,6 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         image_encoder_last_hidden_state = image_encoder_last_hidden_state.to(transformer.dtype)
 
         # Sampling
-
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Start sampling ...'))))
 
         rnd = torch.Generator("cpu").manual_seed(seed)
@@ -1180,36 +1181,42 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
                 return
 
-            generated_latents = sample_hunyuan(
-                transformer=transformer,
-                sampler='unipc',
-                width=width,
-                height=height,
-                frames=num_frames,
-                real_guidance_scale=cfg,
-                distilled_guidance_scale=gs,
-                guidance_rescale=rs,
-                # shift=3.0,
-                num_inference_steps=steps,
-                generator=rnd,
-                prompt_embeds=llama_vec,
-                prompt_embeds_mask=llama_attention_mask,
-                prompt_poolers=clip_l_pooler,
-                negative_prompt_embeds=llama_vec_n,
-                negative_prompt_embeds_mask=llama_attention_mask_n,
-                negative_prompt_poolers=clip_l_pooler_n,
-                device=gpu,
-                dtype=torch.bfloat16,
-                image_embeddings=image_encoder_last_hidden_state,
-                latent_indices=latent_indices,
-                clean_latents=clean_latents,
-                clean_latent_indices=clean_latent_indices,
-                clean_latents_2x=clean_latents_2x,
-                clean_latent_2x_indices=clean_latent_2x_indices,
-                clean_latents_4x=clean_latents_4x,
-                clean_latent_4x_indices=clean_latent_4x_indices,
-                callback=callback,
-            )
+            try:
+                generated_latents = sample_hunyuan(
+                    transformer=transformer,
+                    sampler='unipc',
+                    width=width,
+                    height=height,
+                    frames=num_frames,
+                    real_guidance_scale=cfg,
+                    distilled_guidance_scale=gs,
+                    guidance_rescale=rs,
+                    num_inference_steps=steps,
+                    generator=rnd,
+                    prompt_embeds=llama_vec,
+                    prompt_embeds_mask=llama_attention_mask,
+                    prompt_poolers=clip_l_pooler,
+                    negative_prompt_embeds=llama_vec_n,
+                    negative_prompt_embeds_mask=llama_attention_mask_n,
+                    negative_prompt_poolers=clip_l_pooler_n,
+                    device=gpu,
+                    dtype=torch.bfloat16,
+                    image_embeddings=image_encoder_last_hidden_state,
+                    latent_indices=latent_indices,
+                    clean_latents=clean_latents,
+                    clean_latent_indices=clean_latent_indices,
+                    clean_latents_2x=clean_latents_2x,
+                    clean_latent_2x_indices=clean_latent_2x_indices,
+                    clean_latents_4x=clean_latents_4x,
+                    clean_latent_4x_indices=clean_latent_4x_indices,
+                    callback=callback,
+                )
+            except Exception as e:
+                print(f"Error in sampling: {str(e)}")
+                traceback.print_exc()
+                # If we get an error in sampling, mark the job as failed
+                job_failed = True
+                raise  # Re-raise to stop processing this job
 
             if is_last_section:
                 generated_latents = torch.cat([start_latent.to(generated_latents), generated_latents], dim=2)
@@ -1246,13 +1253,58 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 print(f"Calling clean_up_temp_mp4png with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}")
                 clean_up_temp_mp4png(job_id, outputs_folder, keep_temp_png, keep_temp_mp4)
                 break
-    except:
-        traceback.print_exc()
 
+    except Exception as e:
+        print(f"Error in worker function: {str(e)}")
+        traceback.print_exc()
+        job_failed = True  # Mark job as failed if we hit an unhandled exception
+
+    finally:
+        # Clean up GPU resources
         if not high_vram:
             unload_complete_models(
                 text_encoder, text_encoder_2, image_encoder, vae, transformer
             )
+
+        # Find the job in the queue and update its status
+        for job in job_queue:
+            if job.job_id == job_id:
+                if job_failed:
+                    job.status = "failed"
+                    # Create failed thumbnail
+                    if job.image_path and os.path.exists(job.image_path):
+                        new_thumbnail = create_status_thumbnail(
+                            job.image_path,
+                            "failed",
+                            (255, 0, 0),  # Red color
+                            "FAILED"
+                        )
+                        if new_thumbnail:
+                            new_thumbnail.save(job.thumbnail)
+                else:
+                    job.status = "completed"
+                    # Create completed thumbnail
+                    if job.image_path and os.path.exists(job.image_path):
+                        new_thumbnail = create_status_thumbnail(
+                            job.image_path,
+                            "completed",
+                            (0, 255, 0),  # Green color
+                            "DONE"
+                        )
+                        if new_thumbnail:
+                            new_thumbnail.save(job.thumbnail)
+                break
+
+        # Save the updated queue
+        save_queue()
+
+        # Only mark as failed if we actually failed and didn't complete
+        if job_failed:
+            stream.output_queue.push(('progress', (None, '', make_progress_bar_html(1, f'Failed: {str(e)}'))))
+            stream.output_queue.push(('failed', job_id))
+        else:
+            stream.output_queue.push(('progress', (None, '', make_progress_bar_html(1, 'Completed'))))
+            stream.output_queue.push(('completed', job_id))
 
     stream.output_queue.push(('end', None))
     return
@@ -1477,17 +1529,23 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 )
 
             if flag == 'end':
-                # Find and mark all processing jobs as completed
+                # Find the current processing job
+                current_job = None
                 for job in job_queue:
                     if job.status == "processing":
-                        mark_job_completed(job) 
-                        clean_up_temp_mp4png(job_id, outputs_folder, keep_temp_png, keep_temp_mp4)
-                        cleanup_orphaned_files()
-                        queue_table_update, queue_display_update = mark_job_completed(job)  # Use new function to mark as pending
-                        save_queue()
-                        update_queue_table()  # queue_table
-                        update_queue_display()          # queue_display
+                        current_job = job
                         break
+
+                if current_job:
+                    # Only mark as completed if it's not already marked as failed
+                    if current_job.status != "failed":
+                        mark_job_completed(current_job)
+                        clean_up_temp_mp4png(current_job.job_id, outputs_folder, keep_temp_png, keep_temp_mp4)
+                        cleanup_orphaned_files()
+                        queue_table_update, queue_display_update = mark_job_completed(current_job)
+                        save_queue()
+                        update_queue_table()
+                        update_queue_display()
 
                 # Then check if we should continue processing (only if end button wasn't clicked)
                 if not stream.input_queue.top() == 'end':
@@ -1501,11 +1559,11 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
                     if next_job:
                         # Update next job status to processing
-                        mark_job_processing(next_job)  # Use new function to mark as processing
+                        mark_job_processing(next_job)
                         queue_table_update, queue_display_update = mark_job_processing(next_job)
                         save_queue()
-                        update_queue_table()  # queue_table
-                        update_queue_display()  # queue_display
+                        update_queue_table()
+                        update_queue_display()
                         save_queue()
                         
                         try:
@@ -1701,7 +1759,7 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
                             job.thumbnail = ""
         else:
             # Single image case
-            input_image = np.array(Image.open(input_image[0]))
+            input_image = np.array(Image.open(input_image[0]))  # Convert to numpy array
             
             # Add single image job
             job_id = add_to_queue(
@@ -1948,118 +2006,17 @@ def handle_queue_action(evt: gr.SelectData):
         return remove_job(job_id)
     
     return update_queue_table(), update_queue_display()
-print ("before css code")
-css = make_progress_bar_css() + """
-.gradio-gallery-container {
-    max-height: 600px !important;
-    overflow-y: auto !important;
-    padding: 10px;
-}
-.gradio-gallery-container::-webkit-scrollbar {
-    width: 8px !important;
-}
-.gradio-gallery-container::-webkit-scrollbar-track {
-    background: #f0f0f0 !important;
-}
-.gradio-gallery-container::-webkit-scrollbar-thumb {
-    background-color: #666 !important;
-    border-radius: 4px !important;
-}
-.queue-gallery .gallery-item {
-    margin: 5px;
-}
 
+
+css = make_progress_bar_css() + """
 /* Hide table headers */
 .gradio-dataframe thead {
     display: none !important;
 }
 
-/* Prevent Gradio's wrapper from centering the grid */
-.gradio-dataframe > div {
-    display: flex !important;
-    align-items: flex-start !important;
-}
-
-/* Force AG-Grid to fill its container */
-.ag-theme-gradio .ag-root-wrapper {
-    height: 100% !important;
-}
-.ag-theme-gradio .ag-body-viewport,
-.ag-theme-gradio .ag-center-cols-viewport {
-    height: 100% !important;
-}
-
-/* Set each row to 100px tall */
-.ag-theme-gradio .ag-body-viewport .ag-center-cols-container .ag-row {
-    height: 100px !important;
-}
-
-/* Vertically center the prompt text in column 7 */
-.ag-theme-gradio .ag-center-cols-container .ag-row .ag-cell:nth-child(7) {
-    display: flex !important;
-    align-items: center !important;
-    padding: 0 8px !important;
-}
-
-/* First column fixed width */
-.gradio-dataframe th:first-child,
-.gradio-dataframe td:first-child {
-    width: 150px !important;
-    min-width: 150px !important;
-}
-
-/* Remove orange selection highlight */
-.gradio-dataframe td.selected,
-.gradio-dataframe td:focus,
-.gradio-dataframe tr.selected td,
-.gradio-dataframe tr:focus td {
-    background-color: transparent !important;
-    outline: none !important;
-    box-shadow: none !important;
-}
-
-/* Style the arrow buttons */
-.gradio-dataframe td:nth-child(2),
-.gradio-dataframe td:nth-child(3),
-.gradio-dataframe td:nth-child(4),
-.gradio-dataframe td:nth-child(5),
-.gradio-dataframe td:nth-child(6),
-.gradio-dataframe th:nth-child(2),
-.gradio-dataframe th:nth-child(3),
-.gradio-dataframe th:nth-child(4),
-.gradio-dataframe th:nth-child(5),
-.gradio-dataframe th:nth-child(6) {
-    cursor: pointer;
-    color: #666;
-    font-weight: bold;
-    transition: color 0.2s;
-    width: 30px !important;
-    min-width: 30px !important;
-    max-width: 30px !important;
-    text-align: center !important;
-    padding: 0 !important;
-}
-.gradio-dataframe td:nth-child(2):hover,
-.gradio-dataframe td:nth-child(3):hover,
-.gradio-dataframe td:nth-child(4):hover,
-.gradio-dataframe td:nth-child(5):hover,
-.gradio-dataframe td:nth-child(6):hover {
-    color: #000;
-}
-
-/* Align all headers */
-.gradio-dataframe th {
-    text-align: center !important;
-    padding: 8px !important;
-}
-
-/* Column‐width overrides */
-.gradio-dataframe th:nth-child(7) { width:  80px !important; min-width:  80px !important; }
-.gradio-dataframe th:nth-child(8) { width:  60px !important; min-width:  60px !important; }
-.gradio-dataframe th:nth-child(9) { width: 300px !important; min-width: 300px !important; text-align: left !important; }
-.gradio-dataframe th:nth-child(10){ width:  60px !important; min-width:  60px !important; }
 """
-print("after css code")
+
+
 block = gr.Blocks(css=css).queue()
 
 with block:
@@ -2116,54 +2073,30 @@ with block:
                     progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
                     progress_bar = gr.HTML('', elem_classes='no-generating-animation')
 
-                    # Add back the original queue gallery in a collapsible accordion
-                    with gr.Accordion("Queue Preview", open=False):
-                        queue_display = gr.Gallery(
-                            label="Job Queue Gallery",
-                            show_label=True,
-                            columns=3,
-                            object_fit="contain",
-                            elem_classes=["queue-gallery"],
-                            allow_preview=True,
-                            show_download_button=False,
-                            container=True
-                        )
 
-                    # Add Delete All Jobs button
-                    delete_all_button = gr.Button(value="Delete All Jobs", interactive=True)
-                    delete_all_button.click(
-                        fn=delete_all_jobs,
-                        outputs=[queue_display],
-                        queue=False
+                    queue_display = gr.Gallery(
+                        label="Job Queue Gallery",
+                        show_label=True,
+                        columns=3,
+                        object_fit="contain",
+                        elem_classes=["queue-gallery"],
+                        allow_preview=True,
+                        show_download_button=False,
+                        container=True
                     )
-                    # Queuing Order frame
-                    gr.Markdown("### Queuing Order")
-                    queue_table = gr.DataFrame(
-                        headers=None,
-                        datatype=["markdown", "str", "str", "str", "str", "str", "markdown"],
-                        col_count=(7, "fixed"),
-                        value=[],
-                        interactive=False,
-                        visible=True,
-                        elem_classes=["gradio-dataframe"]
-                    )
+                    
 
         with gr.Tab("Queue Sort Order"):
             gr.Markdown("### Queuing Order")
+            delete_all_button = gr.Button(value="Delete All Jobs", interactive=True)
             queue_table = gr.DataFrame(
                 headers=None,
-                datatype=["markdown", "str", "str", "str", "str", "str", "markdown"],
+                datatype=["markdown","str","str","str","str","str","markdown"],
                 col_count=(7, "fixed"),
                 value=[],
                 interactive=False,
                 visible=True,
                 elem_classes=["gradio-dataframe"]
-            )
-            delete_all_button = gr.Button(value="Delete All Jobs", interactive=True)
-            delete_all_button.click(
-                fn=delete_all_jobs,
-                outputs=[queue_display],
-                queue=False
             )
 
         with gr.Tab("Settings"):
@@ -2187,7 +2120,6 @@ with block:
                         restore_defaults_button = gr.Button("Restore Original Defaults")
 
     # Connect settings buttons and all other UI event bindings at the top level (not in a nested with block)
-    print("Connecting settings buttons...")
     save_defaults_button.click(
         fn=save_settings_from_ui,
         inputs=[
@@ -2207,10 +2139,8 @@ with block:
             settings_keep_temp_png, settings_keep_temp_mp4
         ]
     )
-    print("Settings buttons connected")
 
     # Set default prompt and length
-    print("Setting default prompt and length...")
     default_prompt, default_n_prompt, default_length, default_gs, default_steps, default_teacache, default_seed, default_cfg, default_rs, default_gpu_memory, default_mp4_crf = get_default_prompt()
     prompt.value = default_prompt
     n_prompt.value = default_n_prompt
@@ -2225,10 +2155,8 @@ with block:
     mp4_crf.value = default_mp4_crf
     keep_temp_png.value = Config.DEFAULT_KEEP_TEMP_PNG
     keep_temp_mp4.value = Config.DEFAULT_KEEP_TEMP_MP4
-    print("Default prompt and length set")
 
     # Connect UI elements
-    print("Connecting UI elements...")
     save_prompt_button.click(
         save_quick_prompt,
         inputs=[prompt, n_prompt, total_second_length, gs, steps, use_teacache, seed, cfg, rs, gpu_memory_preservation, mp4_crf],
@@ -2279,8 +2207,6 @@ with block:
     # Connect queue actions
     queue_table.select(fn=handle_queue_action, inputs=[], outputs=[queue_table, queue_display])
 
-    gr.HTML('<div style="text-align:center; margin-top:20px;">Share your results and find ideas at the <a href="https://x.com/search?q=framepack&f=live" target="_blank">FramePack Twitter (X) thread</a></div>')
-
     ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4]
     start_button.click(
         fn=process, 
@@ -2300,10 +2226,10 @@ with block:
     # Add these calls at startup
     reset_processing_jobs()
     cleanup_orphaned_files()
-    print("UI elements connected")
+
 
 # Launch the interface
-print("Launching interface...")
+
 block.launch(
     server_name=args.server,
     server_port=args.port,
