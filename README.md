@@ -7,10 +7,10 @@
 ## 🚀 Features
 
 - **Sequential Queuing**  
-  Add multiple jobs (one per image) and process them one after another with a single click.
+  Add multiple jobs (one at a time) and have Framepack process them one after another with a single click.
 
 - **Batch Upload**  
-  Upload several images at once, enter your prompt & settings, then “Add to Queue” to generate a batch.
+  Upload several images at once, enter your prompt & settings, then “Add to Queue” to generate a batch of 1 jobe for each image.
 
 - **Quick-List Prompts**  
   Save your favorite prompts & settings for instant recall.  
@@ -18,7 +18,7 @@
   • Select from saved prompts to update the UI before adding new jobs.
 
 - **Customizable Queue Order**  
-  In the **Queue Sort Order** tab, reorder jobs (↑ up, ↓ down, “Top”, “Bottom”) or delete jobs.
+  In the **Queue Sort Order** tab, reorder jobs ('↑' up, '↓' down, 'T' Top, 'B' Bottom) or 'X' to delete.
 
 - **Persistent Defaults**  
   Save your preferred settings as the default.  
