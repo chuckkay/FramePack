@@ -1,8 +1,66 @@
-QUEUEITUP FOR FRAMEPACK
-LIST OF FEATURES AND INSTRUCTIONS COMMING SOON
+# QueueItUp for FramePack
 
-![Screenshot 2025-04-21 210410](https://github.com/user-attachments/assets/45617d1d-c825-436b-bfa5-af8359a3c541)
-![Screenshot 2025-04-21 205415](https://github.com/user-attachments/assets/14f58aeb-33da-4e79-b3bb-1cf294edc7e0)
+> A lightweight job-queue extension for lllyasviel’s FramePack WebUI
+
+---
+
+## 🚀 Features
+
+- **Sequential Queuing**  
+  Add multiple jobs (one per image) and process them one after another with a single click.
+
+- **Batch Upload**  
+  Upload several images at once, enter your prompt & settings, then “Add to Queue” to generate a batch.
+
+- **Quick-List Prompts**  
+  Save your favorite prompts & settings for instant recall.  
+  • Delete unwanted entries at any time.  
+  • Select from saved prompts to update the UI before adding new jobs.
+
+- **Customizable Queue Order**  
+  In the **Queue Sort Order** tab, reorder jobs (↑ up, ↓ down, “Top”, “Bottom”) or delete jobs.
+
+- **Persistent Defaults**  
+  Save your preferred settings as the default.  
+  Restore the original defaults with one click.
+
+- **Output-Folder Control**  
+  Toggle whether intermediate PNGs or latent MP4s are kept alongside the final video.
+
+- **Live Progress Info**  
+  The status bar above the progress bar shows the current job name and percentage complete.
+
+---
+
+## 💾 Installation
+
+1. **Download**  
+   - [Framepack_QueueItUp.bat]  
+   - [Framepack_QueueItUp.py]
+
+2. **Deploy**  
+   Place both files in your FramePack WebUI directory.
+
+3. **Run**  
+   Double-click `Framepack_QueueItUp.bat`.  
+   (You can still launch the original WebUI via lllyasviel’s `run.bat`.)
+*Stay tuned—more detailed usage instructions and advanced tips are coming soon!*  
+---
+---
+
+## 📸 Screenshots
+
+![Main UI – QueueItUp Controls](https://github.com/user-attachments/assets/45617d1d-c825-436b-bfa5-af8359a3c541)
+
+![Queue Sort Order Tab](https://github.com/user-attachments/assets/14f58aeb-33da-4e79-b3bb-1cf294edc7e0)
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/2cc030b4-87e1-40a0-b5bf-1b7d6b62820b" width="300" alt="Compact Quick-List Panel">
+</p>
+
+
+
+
 
 
 <p align="center">
