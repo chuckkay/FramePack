@@ -35,9 +35,10 @@
 ## 💾 Installation
 
 1. **Download**  
-   - [Framepack_QueueItUp.bat]  
-   - [Framepack_QueueItUp.py]
-
+   1. Get lllyasviel’s FramePack WebUI, install it, and run `update.bat`.  
+   2. Then download from this repo:  
+      - `Framepack_QueueItUp.bat`  
+      - `Framepack_QueueItUp.py`
 2. **Deploy**  
    Place both files in your FramePack WebUI directory.
 
