@@ -25,17 +25,19 @@
   Restore the original defaults with one click.
 
 - **Output-Folder Control**  
-  Toggle whether intermediate PNGs or latent MP4s are kept alongside the final video.
+  Toggle whether intermediate latent MP4s, PNGs  and job json data are kept alongside the final video.
+  coming soon set your own default output folder where your creations will be saved.
 
+- **Random Seeds**  
+  if seed is -1 for a job it will save it to queue and when the job is run it will create a random seed and save it along with all the setting in a job.json file and as meta data in the png file.
+  
 - **Live Progress Info**  
   The status bar above the progress bar shows the current job name and percentage complete.
-
 ---
-
 ## 💾 Installation
 
 1. **Download**  
-   1. Get lllyasviel’s FramePack WebUI, install it, and run `update.bat`.  
+   1. follow the instructions below for installing the full version of lllyasviel’s FramePack WebUI below, install it, and run `update.bat`.  
    2. Then download from this repo:  
       - `Framepack_QueueItUp.bat`  
       - `Framepack_QueueItUp.py`
@@ -55,20 +57,12 @@
 
 ![Queue Sort Order Tab](https://github.com/user-attachments/assets/14f58aeb-33da-4e79-b3bb-1cf294edc7e0)
 
+
+
+# FramePack
 <p align="center">
   <img src="https://github.com/user-attachments/assets/2cc030b4-87e1-40a0-b5bf-1b7d6b62820b" width="300" alt="Compact Quick-List Panel">
 </p>
-
-
-
-
-
-
-<p align="center">
-    <img src="https://github.com/user-attachments/assets/2cc030b4-87e1-40a0-b5bf-1b7d6b62820b" width="300">
-</p>
-
-# FramePack
 
 Official implementation and desktop software for ["Packing Input Frame Context in Next-Frame Prediction Models for Video Generation"](https://lllyasviel.github.io/frame_pack_gitpage/).
 
