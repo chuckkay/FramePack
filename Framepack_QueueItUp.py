@@ -11,6 +11,29 @@ import uuid
 import configparser
 import ast
 import random
+import gradio as gr
+import torch
+import traceback
+import einops
+import safetensors.torch as sf
+import numpy as np
+import argparse
+import math
+from PIL import Image, ImageDraw, ImageFont
+from PIL.PngImagePlugin import PngInfo
+from diffusers import AutoencoderKLHunyuanVideo
+from transformers import LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer
+from diffusers_helper.hunyuan import encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake
+from diffusers_helper.utils import save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw, resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge, generate_timestamp
+from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
+from diffusers_helper.pipelines.k_diffusion_hunyuan import sample_hunyuan
+from diffusers_helper.memory import cpu, gpu, get_cuda_free_memory_gb, move_model_to_device_with_memory_preservation, offload_model_from_device_for_memory_preservation, fake_diffusers_current_device, DynamicSwapInstaller, unload_complete_models, load_model_as_complete
+from diffusers_helper.thread_utils import AsyncStream, async_run
+from diffusers_helper.gradio.progress_bar import make_progress_bar_css, make_progress_bar_html
+from transformers import SiglipImageProcessor, SiglipVisionModel
+from diffusers_helper.clip_vision import hf_clip_vision_encode
+from diffusers_helper.bucket_tools import find_nearest_bucket
+import shutil
 
 # Path to settings file
 SETTINGS_FILE = os.path.join(os.getcwd(), 'settings.ini')
@@ -252,29 +275,6 @@ else:
     with open(PROMPT_FILE, 'w') as f:
         json.dump(quick_prompts, f, indent=2)
 
-import gradio as gr
-import torch
-import traceback
-import einops
-import safetensors.torch as sf
-import numpy as np
-import argparse
-import math
-
-from PIL import Image, ImageDraw, ImageFont
-from PIL.PngImagePlugin import PngInfo
-from diffusers import AutoencoderKLHunyuanVideo
-from transformers import LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer
-from diffusers_helper.hunyuan import encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake
-from diffusers_helper.utils import save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw, resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge, generate_timestamp
-from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
-from diffusers_helper.pipelines.k_diffusion_hunyuan import sample_hunyuan
-from diffusers_helper.memory import cpu, gpu, get_cuda_free_memory_gb, move_model_to_device_with_memory_preservation, offload_model_from_device_for_memory_preservation, fake_diffusers_current_device, DynamicSwapInstaller, unload_complete_models, load_model_as_complete
-from diffusers_helper.thread_utils import AsyncStream, async_run
-from diffusers_helper.gradio.progress_bar import make_progress_bar_css, make_progress_bar_html
-from transformers import SiglipImageProcessor, SiglipVisionModel
-from diffusers_helper.clip_vision import hf_clip_vision_encode
-from diffusers_helper.bucket_tools import find_nearest_bucket
 
 @dataclass
 class QueuedJob:
@@ -576,8 +576,6 @@ def update_queue_display():
 
 def update_queue_table():
     """Update the queue table display with current jobs from JSON"""
-
-    
     data = []
     for job in job_queue:
         # Only check for missing images if the job is not being deleted
@@ -593,7 +591,6 @@ def update_queue_table():
                     job.image_path = new_queue_image
                     job.thumbnail = new_thumbnail
                     job.status = "missing"
-                    # save_queue()
             elif not job.thumbnail and job.image_path:
                 try:
                     # Load and resize image for thumbnail
@@ -605,7 +602,6 @@ def update_queue_table():
                     thumb_path = os.path.join(temp_queue_images, f"thumb_{job.job_id}.png")
                     img.save(thumb_path)
                     job.thumbnail = thumb_path
-                    # save_queue()
                 except Exception as e:
                     print(f"Error creating thumbnail: {str(e)}")
                     job.thumbnail = ""
@@ -627,13 +623,24 @@ def update_queue_table():
         # Use full prompt text without truncation
         prompt_cell = f'<span style="white-space: normal; word-wrap: break-word; display: block; width: 100%;">{job.prompt}</span>'
 
+        # Add edit button for pending jobs
+        edit_button = "✎" if job.status == "pending" else ""
+        top_button = "⏫️"
+        up_button = "⬆️"
+        down_button = "⬇️"
+        bottom_button = "⏬️"
+        remove_button = "❌"
+        copy_button = "📋"
+
         data.append([
             img_md,           # Input thumbnail with ID, length, and status
-            "T",             # Top button
-            "↑",             # Up button
-            "↓",             # Down button
-            "B",             # Bottom button
-            "×",             # Remove button
+            top_button,
+            up_button,
+            down_button,
+            bottom_button,
+            remove_button,
+            copy_button,
+            edit_button,
             prompt_cell      # Prompt
         ])
     return gr.DataFrame(value=data, visible=True, elem_classes=["gradio-dataframe"])
@@ -662,7 +669,6 @@ def cleanup_orphaned_files():
         for file in orphaned_files:
             try:
                 os.remove(file)
-                print(f"Deleted orphaned file: {file}")
             except Exception as e:
                 print(f"Error deleting file {file}: {str(e)}")
     except Exception as e:
@@ -855,7 +861,8 @@ else:
 
 stream = AsyncStream()
 
-outputs_folder = './outputs/'
+#make the output_folder path value saved in setting.ini and the value loaded from setting.ini on startup, and changable in the settings tab
+outputs_folder = './outputs/' #this is the fall back directory on restore defaults
 os.makedirs(outputs_folder, exist_ok=True)
 
 def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool = False, keep_temp_mp4: bool = False, keep_temp_json: bool = False) -> None:
@@ -1153,10 +1160,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             "rs": rs,
             "gpu_memory_preservation": gpu_memory_preservation,
             "use_teacache": use_teacache,
-            "mp4_crf": mp4_crf,
-            "keep_temp_png": keep_temp_png,
-            "keep_temp_mp4": keep_temp_mp4,
-            "keep_temp_json": keep_temp_json
+            "mp4_crf": mp4_crf
         }
         with open(os.path.join(outputs_folder, f'{job_id}.json'), 'w') as f:
             json.dump(job_params, f, indent=2)
@@ -1252,7 +1256,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 percent_done = (current_time / total_second_length) * 100
                 desc = f'Current Job is running, Total generated frames: {int(max(0, total_generated_latent_frames * 4 - 3))}, Video length: {current_time:.2f} seconds of {total_second_length} at (FPS-30). The video is being extended now and is {percent_done:.1f}% done'
                 stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
-                return
+                return 
 
             try:
                 generated_latents = sample_hunyuan(
@@ -2071,8 +2075,10 @@ def remove_job(job_id):
 
 def handle_queue_action(evt: gr.SelectData):
     """Handle queue action button clicks"""
-    if evt.index is None or evt.value not in ["T", "↑", "↓", "B", "×"]:
-        return update_queue_table(), update_queue_display()
+    if evt.index is None or evt.value not in ["⏫️", "⬆️", "⬇️", "⏬️", "❌", "📋", "✎"]:
+        return (
+            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
+        )
     
     row_index, col_index = evt.index
     button_clicked = evt.value
@@ -2080,19 +2086,133 @@ def handle_queue_action(evt: gr.SelectData):
     # Get the job ID from the first column
     job_id = job_queue[row_index].job_id
     
-    if button_clicked == "T":
-        return move_job_to_top(job_id)
-    elif button_clicked == "↑":
-        return move_job(job_id, 'up')
-    elif button_clicked == "↓":
-        return move_job(job_id, 'down')
-    elif button_clicked == "B":
-        return move_job_to_bottom(job_id)
-    elif button_clicked == "×":
-        return remove_job(job_id)
+    if button_clicked == "⏫️":  # Double up arrow (Top)
+        move_job_to_top(job_id)
+        return (
+            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
+        )
+    elif button_clicked == "⬆️":  # Single up arrow (Up)
+        move_job(job_id, 'up')
+        return (
+            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
+        )
+    elif button_clicked == "⬇️":  # Single down arrow (Down)
+        move_job(job_id, 'down')
+        return (
+            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
+        )
+    elif button_clicked == "⏬️":  # Double down arrow (Bottom)
+        move_job_to_bottom(job_id)
+        return (
+            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
+        )
+    elif button_clicked == "❌":
+        remove_job(job_id)
+        return (
+            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
+        )
+    elif button_clicked == "📋":
+        copy_job(job_id)
+        return (
+            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
+        )
+    elif button_clicked == "✎":
+        # Get the job
+        job = next((j for j in job_queue if j.job_id == job_id), None)
+        if job and job.status == "pending":
+            # Return the job parameters for editing and show edit group
+            return (
+                job.prompt,
+                job.n_prompt,
+                job.video_length,
+                job.seed,
+                job.use_teacache,
+                job.gpu_memory_preservation,
+                job.steps,
+                job.cfg,
+                job.gs,
+                job.rs,
+                job.mp4_crf,
+                job.keep_temp_png,
+                job.keep_temp_mp4,
+                job.keep_temp_json,
+                job_id,
+                gr.update(visible=True)  # Show edit group
+            )
     
-    return update_queue_table(), update_queue_display()
+    return (
+        "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
+    )
 
+def copy_job(job_id):
+    """Create a copy of a job and insert it below the original"""
+    try:
+        # Find the job
+        original_job = next((j for j in job_queue if j.job_id == job_id), None)
+        if not original_job:
+            return update_queue_table(), update_queue_display()
+        
+        # Create a new job ID
+        new_job_id = uuid.uuid4().hex[:8]
+        
+        # Copy the image file
+        if os.path.exists(original_job.image_path):
+            new_image_path = os.path.join(temp_queue_images, f"queue_image_{new_job_id}.png")
+            shutil.copy2(original_job.image_path, new_image_path)
+        else:
+            new_image_path = ""
+        
+        # Create new job with copied parameters
+        new_job = QueuedJob(
+            prompt=original_job.prompt,
+            image_path=new_image_path,
+            video_length=original_job.video_length,
+            job_id=new_job_id,
+            seed=original_job.seed,
+            use_teacache=original_job.use_teacache,
+            gpu_memory_preservation=original_job.gpu_memory_preservation,
+            steps=original_job.steps,
+            cfg=original_job.cfg,
+            gs=original_job.gs,
+            rs=original_job.rs,
+            n_prompt=original_job.n_prompt,
+            status="pending",
+            thumbnail="",
+            mp4_crf=original_job.mp4_crf,
+            keep_temp_png=original_job.keep_temp_png,
+            keep_temp_mp4=original_job.keep_temp_mp4,
+            keep_temp_json=original_job.keep_temp_json
+        )
+        
+        # Find the original job's index
+        original_index = job_queue.index(original_job)
+        
+        # Insert the new job right after the original
+        job_queue.insert(original_index + 1, new_job)
+        
+        # Create thumbnail for the new job
+        if new_image_path:
+            try:
+                img = Image.open(new_image_path)
+                width, height = img.size
+                new_height = 200
+                new_width = int((new_height / height) * width)
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                thumb_path = os.path.join(temp_queue_images, f"thumb_{new_job_id}.png")
+                img.save(thumb_path)
+                new_job.thumbnail = thumb_path
+            except Exception as e:
+                print(f"Error creating thumbnail: {str(e)}")
+                new_job.thumbnail = ""
+        
+        # Save the updated queue
+        save_queue()
+        
+        return update_queue_table(), update_queue_display()
+    except Exception as e:
+        print(f"Error copying job: {str(e)}")
+        traceback.print_exc()
+        return update_queue_table(), update_queue_display()
 
 css = make_progress_bar_css() + """
 .gradio-gallery-container {
@@ -2178,11 +2298,14 @@ css = make_progress_bar_css() + """
     color: #666;
     font-weight: bold;
     transition: color 0.2s;
-    width: 30px !important;
-    min-width: 30px !important;
-    max-width: 30px !important;
+    width: 42px !important;
+    min-width: 42px !important;
+    max-width: 42px !important;
     text-align: center !important;
+    vertical-align: middle !important;
+    font-size: 1.5em !important;
     padding: 0 !important;
+    overflow: visible !important;
 }
 .gradio-dataframe td:nth-child(2):hover,
 .gradio-dataframe td:nth-child(3):hover,
@@ -2206,10 +2329,46 @@ css = make_progress_bar_css() + """
 """
 
 
+def edit_job(job_id, new_prompt, new_n_prompt, new_video_length, new_seed, new_use_teacache, new_gpu_memory_preservation, new_steps, new_cfg, new_gs, new_rs, new_mp4_crf, new_keep_temp_png, new_keep_temp_mp4, new_keep_temp_json):
+    """Edit a job's parameters"""
+    try:
+        # Find the job
+        for job in job_queue:
+            if job.job_id == job_id:
+                # Only allow editing if job is pending
+                if job.status != "pending":
+                    return update_queue_table(), update_queue_display(), gr.update(visible=False)
+                
+                # Update job parameters
+                job.prompt = new_prompt
+                job.n_prompt = new_n_prompt
+                job.video_length = new_video_length
+                job.seed = new_seed
+                job.use_teacache = new_use_teacache
+                job.gpu_memory_preservation = new_gpu_memory_preservation
+                job.steps = new_steps
+                job.cfg = new_cfg
+                job.gs = new_gs
+                job.rs = new_rs
+                job.mp4_crf = new_mp4_crf
+                job.keep_temp_png = new_keep_temp_png
+                job.keep_temp_mp4 = new_keep_temp_mp4
+                job.keep_temp_json = new_keep_temp_json
+                
+                # Save changes
+                save_queue()
+                break
+        
+        return update_queue_table(), update_queue_display(), gr.update(visible=False)  # Hide edit group
+    except Exception as e:
+        print(f"Error editing job: {str(e)}")
+        traceback.print_exc()
+        return update_queue_table(), update_queue_display(), gr.update(visible=False)  # Hide edit group
+
 block = gr.Blocks(css=css).queue()
 
 with block:
-    gr.Markdown('# FramePack')
+    gr.Markdown('# FramePack (QueueItUp versionn)')
     
     with gr.Tabs():
         with gr.Tab("Framepack_QueueItUp"):
@@ -2281,13 +2440,35 @@ with block:
             delete_all_button = gr.Button(value="Delete All Jobs", interactive=True)
             queue_table = gr.DataFrame(
                 headers=None,
-                datatype=["markdown","str","str","str","str","str","markdown"],
-                col_count=(7, "fixed"),
+                datatype=["markdown","str","str","str","str","str","str","str","markdown"],
+                col_count=(9, "fixed"),
                 value=[],
                 interactive=False,
                 visible=True,
                 elem_classes=["gradio-dataframe"]
             )
+
+            # Add edit dialog
+            with gr.Row():
+                with gr.Column():
+                    edit_job_id = gr.Textbox(label="Job ID", visible=False)
+                    edit_group = gr.Group(visible=False)  # Hidden by default
+                    with edit_group:
+                        save_edit_button = gr.Button("Save Changes")
+                        edit_prompt = gr.Textbox(label="Edit Prompt")
+                        edit_n_prompt = gr.Textbox(label="Edit Negative Prompt")
+                        edit_video_length = gr.Slider(label="Edit Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
+                        edit_seed = gr.Number(label="Edit Seed", value=-1, precision=0)
+                        edit_use_teacache = gr.Checkbox(label='Edit Use TeaCache', value=True)
+                        edit_gpu_memory_preservation = gr.Slider(label="Edit GPU Memory Preservation (GB)", minimum=6, maximum=128, value=6, step=0.1)
+                        edit_steps = gr.Slider(label="Edit Steps", minimum=1, maximum=100, value=25, step=1)
+                        edit_cfg = gr.Slider(label="Edit CFG Scale", minimum=1.0, maximum=32.0, value=1.0, step=0.01)
+                        edit_gs = gr.Slider(label="Edit Distilled CFG Scale", minimum=1.0, maximum=32.0, value=10.0, step=0.01)
+                        edit_rs = gr.Slider(label="Edit CFG Re-Scale", minimum=0.0, maximum=1.0, value=0.0, step=0.01)
+                        edit_mp4_crf = gr.Slider(label="Edit MP4 Compression", minimum=0, maximum=100, value=16, step=1)
+                        edit_keep_temp_png = gr.Checkbox(label="Edit Keep temp PNG", value=False)
+                        edit_keep_temp_mp4 = gr.Checkbox(label="Edit Keep temp MP4", value=False)
+                        edit_keep_temp_json = gr.Checkbox(label="Edit Keep temp JSON", value=False)
 
         with gr.Tab("Settings"):
             gr.Markdown("### Current Defaults")
@@ -2397,7 +2578,54 @@ with block:
     )
 
     # Connect queue actions
-    queue_table.select(fn=handle_queue_action, inputs=[], outputs=[queue_table, queue_display])
+    queue_table.select(
+        fn=handle_queue_action,
+        inputs=[],
+        outputs=[
+            edit_prompt,
+            edit_n_prompt,
+            edit_video_length,
+            edit_seed,
+            edit_use_teacache,
+            edit_gpu_memory_preservation,
+            edit_steps,
+            edit_cfg,
+            edit_gs,
+            edit_rs,
+            edit_mp4_crf,
+            edit_keep_temp_png,
+            edit_keep_temp_mp4,
+            edit_keep_temp_json,
+            edit_job_id,
+            edit_group
+        ]
+    ).then(
+        fn=lambda: (update_queue_table(), update_queue_display()),
+        inputs=[],
+        outputs=[queue_table, queue_display]
+    )
+
+    save_edit_button.click(
+        fn=edit_job,
+        inputs=[
+            edit_job_id,
+            edit_prompt,
+            edit_n_prompt,
+            edit_video_length,
+            edit_seed,
+            edit_use_teacache,
+            edit_gpu_memory_preservation,
+            edit_steps,
+            edit_cfg,
+            edit_gs,
+            edit_rs,
+            edit_mp4_crf,
+            edit_keep_temp_png,
+            edit_keep_temp_mp4,
+            edit_keep_temp_json
+        ],
+        outputs=[queue_table, queue_display, edit_group]
+    )
 
     ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json]
     start_button.click(
