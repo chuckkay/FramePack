@@ -10,6 +10,7 @@ from typing import Optional
 import uuid
 import configparser
 import ast
+import random
 
 # Path to settings file
 SETTINGS_FILE = os.path.join(os.getcwd(), 'settings.ini')
@@ -39,7 +40,7 @@ def save_settings(config):
     with open(SETTINGS_FILE, 'w') as f:
         config.write(f)
 
-def save_settings_from_ui(use_teacache, seed, video_length, steps, cfg, gs, rs, gpu_memory, mp4_crf, keep_temp_png, keep_temp_mp4):
+def save_settings_from_ui(use_teacache, seed, video_length, steps, cfg, gs, rs, gpu_memory, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
     """Save settings from UI to settings.ini"""
     global Config, settings_config
     Config.DEFAULT_USE_TEACACHE = bool(use_teacache)
@@ -53,6 +54,7 @@ def save_settings_from_ui(use_teacache, seed, video_length, steps, cfg, gs, rs, 
     Config.DEFAULT_MP4_CRF = int(mp4_crf)
     Config.DEFAULT_KEEP_TEMP_PNG = bool(keep_temp_png)
     Config.DEFAULT_KEEP_TEMP_MP4 = bool(keep_temp_mp4)
+    Config.DEFAULT_KEEP_TEMP_JSON = bool(keep_temp_json)
     Config.to_settings(settings_config)
     return "Settings saved successfully!"
 
@@ -74,7 +76,8 @@ def restore_original_defaults():
         Config.DEFAULT_GPU_MEMORY,
         Config.DEFAULT_MP4_CRF,
         Config.DEFAULT_KEEP_TEMP_PNG,
-        Config.DEFAULT_KEEP_TEMP_MP4
+        Config.DEFAULT_KEEP_TEMP_MP4,
+        Config.DEFAULT_KEEP_TEMP_JSON
     )
 
 @dataclass
@@ -94,6 +97,7 @@ class Config:
     DEFAULT_MP4_CRF: int = 16
     DEFAULT_KEEP_TEMP_PNG: bool = False
     DEFAULT_KEEP_TEMP_MP4: bool = False
+    DEFAULT_KEEP_TEMP_JSON: bool = False
 
     @classmethod
     def get_original_defaults(cls):
@@ -110,8 +114,9 @@ class Config:
             'DEFAULT_RS': 0.0,
             'DEFAULT_GPU_MEMORY': 6.0,
             'DEFAULT_MP4_CRF': 16,
-            'DEFAULT_KEEP_TEMP_PNG': False,
-            'DEFAULT_KEEP_TEMP_MP4': False
+            'DEFAULT_KEEP_TEMP_PNG': True,
+            'DEFAULT_KEEP_TEMP_MP4': False,
+            'DEFAULT_KEEP_TEMP_JSON': True
         }
 
     @classmethod
@@ -131,6 +136,14 @@ class Config:
         cls.DEFAULT_MP4_CRF = int(section['DEFAULT_MP4_CRF'])
         cls.DEFAULT_KEEP_TEMP_PNG = ast.literal_eval(section['DEFAULT_KEEP_TEMP_PNG'])
         cls.DEFAULT_KEEP_TEMP_MP4 = ast.literal_eval(section['DEFAULT_KEEP_TEMP_MP4'])
+        # Handle missing DEFAULT_KEEP_TEMP_JSON key
+        try:
+            cls.DEFAULT_KEEP_TEMP_JSON = ast.literal_eval(section['DEFAULT_KEEP_TEMP_JSON'])
+        except KeyError:
+            cls.DEFAULT_KEEP_TEMP_JSON = False
+            # Add the missing key to the config
+            section['DEFAULT_KEEP_TEMP_JSON'] = str(cls.DEFAULT_KEEP_TEMP_JSON)
+            save_settings(config)
         return cls
 
     @classmethod
@@ -150,6 +163,7 @@ class Config:
         section['DEFAULT_MP4_CRF'] = str(cls.DEFAULT_MP4_CRF)
         section['DEFAULT_KEEP_TEMP_PNG'] = str(cls.DEFAULT_KEEP_TEMP_PNG)
         section['DEFAULT_KEEP_TEMP_MP4'] = str(cls.DEFAULT_KEEP_TEMP_MP4)
+        section['DEFAULT_KEEP_TEMP_JSON'] = str(cls.DEFAULT_KEEP_TEMP_JSON)
         save_settings(config)
 
     @classmethod
@@ -166,7 +180,10 @@ class Config:
             cls.DEFAULT_CFG,
             cls.DEFAULT_RS,
             cls.DEFAULT_GPU_MEMORY,
-            cls.DEFAULT_MP4_CRF
+            cls.DEFAULT_MP4_CRF,
+            cls.DEFAULT_KEEP_TEMP_PNG,
+            cls.DEFAULT_KEEP_TEMP_MP4,
+            cls.DEFAULT_KEEP_TEMP_JSON
         )
 
     @classmethod
@@ -183,7 +200,10 @@ class Config:
             'cfg': cls.DEFAULT_CFG,
             'rs': cls.DEFAULT_RS,
             'gpu_memory_preservation': cls.DEFAULT_GPU_MEMORY,
-            'mp4_crf': cls.DEFAULT_MP4_CRF
+            'mp4_crf': cls.DEFAULT_MP4_CRF,
+            'keep_temp_png': cls.DEFAULT_KEEP_TEMP_PNG,
+            'keep_temp_mp4': cls.DEFAULT_KEEP_TEMP_MP4,
+            'keep_temp_json': cls.DEFAULT_KEEP_TEMP_JSON
         }
 
 # Load settings at startup
@@ -216,7 +236,10 @@ DEFAULT_PROMPTS = [
         'cfg': Config.DEFAULT_CFG,
         'rs': Config.DEFAULT_RS,
         'gpu_memory_preservation': Config.DEFAULT_GPU_MEMORY,
-        'mp4_crf': Config.DEFAULT_MP4_CRF
+        'mp4_crf': Config.DEFAULT_MP4_CRF,
+        'keep_temp_png': Config.DEFAULT_KEEP_TEMP_PNG,
+        'keep_temp_mp4': Config.DEFAULT_KEEP_TEMP_MP4,
+        'keep_temp_json': Config.DEFAULT_KEEP_TEMP_JSON
     }
 ]
 
@@ -272,6 +295,7 @@ class QueuedJob:
     mp4_crf: float = 16
     keep_temp_png: bool = False
     keep_temp_mp4: bool = False
+    keep_temp_json: bool = False
 
     def to_dict(self):
         try:
@@ -292,7 +316,8 @@ class QueuedJob:
                 'thumbnail': self.thumbnail,
                 'mp4_crf': self.mp4_crf,
                 'keep_temp_png': self.keep_temp_png,
-                'keep_temp_mp4': self.keep_temp_mp4
+                'keep_temp_mp4': self.keep_temp_mp4,
+                'keep_temp_json': self.keep_temp_json
             }
         except Exception as e:
             print(f"Error converting job to dict: {str(e)}")
@@ -318,7 +343,8 @@ class QueuedJob:
                 thumbnail=data['thumbnail'],
                 mp4_crf=data['mp4_crf'],
                 keep_temp_png=data.get('keep_temp_png', False),  # Default to False for backward compatibility
-                keep_temp_mp4=data.get('keep_temp_mp4', False)   # Default to False for backward compatibility
+                keep_temp_mp4=data.get('keep_temp_mp4', False),   # Default to False for backward compatibility
+                keep_temp_json=data.get('keep_temp_json', False)   # Default to False for backward compatibility
             )
         except Exception as e:
             print(f"Error creating job from dict: {str(e)}")
@@ -400,7 +426,7 @@ def save_image_to_temp(image: np.ndarray, job_id: str) -> str:
         traceback.print_exc()
         return ""
 
-def add_to_queue(prompt, n_prompt, input_image, total_second_length, seed, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, status="pending", mp4_crf=16, keep_temp_png=False, keep_temp_mp4=False):
+def add_to_queue(prompt, n_prompt, input_image, total_second_length, seed, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, status="pending", mp4_crf=16, keep_temp_png=False, keep_temp_mp4=False, keep_temp_json=False):
     save_queue()
     try:
         # Make sure queue is loaded
@@ -412,6 +438,10 @@ def add_to_queue(prompt, n_prompt, input_image, total_second_length, seed, use_t
         image_path = save_image_to_temp(input_image, job_id)
         if not image_path:
             return None
+            
+        # Generate random seed if seed is -1
+        if seed == -1:
+            seed = random.randint(0, 2**32 - 1)
             
         job = QueuedJob(
             prompt=prompt,
@@ -429,7 +459,8 @@ def add_to_queue(prompt, n_prompt, input_image, total_second_length, seed, use_t
             status=status,
             mp4_crf=mp4_crf,
             keep_temp_png=keep_temp_png,
-            keep_temp_mp4=keep_temp_mp4
+            keep_temp_mp4=keep_temp_mp4,
+            keep_temp_json=keep_temp_json
         )
         
         # Find the first completed job to insert before
@@ -695,14 +726,17 @@ def get_default_prompt():
                 quick_prompts[0].get('cfg', Config.DEFAULT_CFG),
                 quick_prompts[0].get('rs', Config.DEFAULT_RS),
                 quick_prompts[0].get('gpu_memory_preservation', Config.DEFAULT_GPU_MEMORY),
-                quick_prompts[0].get('mp4_crf', Config.DEFAULT_MP4_CRF)
+                quick_prompts[0].get('mp4_crf', Config.DEFAULT_MP4_CRF),
+                quick_prompts[0].get('keep_temp_png', Config.DEFAULT_KEEP_TEMP_PNG),
+                quick_prompts[0].get('keep_temp_mp4', Config.DEFAULT_KEEP_TEMP_MP4),
+                quick_prompts[0].get('keep_temp_json', Config.DEFAULT_KEEP_TEMP_JSON)
             )
         return Config.get_default_prompt_tuple()
     except Exception as e:
         print(f"Error getting default prompt: {str(e)}")
         return Config.get_default_prompt_tuple()
 
-def save_quick_prompt(prompt_text, n_prompt_text, video_length, gs_value, steps_value, use_teacache_value, seed_value, cfg_value, rs_value, gpu_memory_preservation_value, mp4_crf_value):
+def save_quick_prompt(prompt_text, n_prompt_text, video_length, gs_value, steps_value, use_teacache_value, seed_value, cfg_value, rs_value, gpu_memory_preservation_value, mp4_crf_value, keep_temp_png_value, keep_temp_mp4_value, keep_temp_json_value):
     global quick_prompts
     if prompt_text:
         # Check if prompt already exists
@@ -718,6 +752,9 @@ def save_quick_prompt(prompt_text, n_prompt_text, video_length, gs_value, steps_
                 item['rs'] = rs_value
                 item['gpu_memory_preservation'] = gpu_memory_preservation_value
                 item['mp4_crf'] = mp4_crf_value
+                item['keep_temp_png'] = keep_temp_png_value
+                item['keep_temp_mp4'] = keep_temp_mp4_value
+                item['keep_temp_json'] = keep_temp_json_value
                 break
         else:
             quick_prompts.append({
@@ -731,13 +768,16 @@ def save_quick_prompt(prompt_text, n_prompt_text, video_length, gs_value, steps_
                 'cfg': cfg_value,
                 'rs': rs_value,
                 'gpu_memory_preservation': gpu_memory_preservation_value,
-                'mp4_crf': mp4_crf_value
+                'mp4_crf': mp4_crf_value,
+                'keep_temp_png': keep_temp_png_value,
+                'keep_temp_mp4': keep_temp_mp4_value,
+                'keep_temp_json': keep_temp_json_value
             })
         
         with open(PROMPT_FILE, 'w') as f:
             json.dump(quick_prompts, f, indent=2)
     # Keep the text in the prompt box and set it as selected in quick list
-    return prompt_text, n_prompt_text, gr.update(choices=[item['prompt'] for item in quick_prompts], value=prompt_text), video_length, gs_value, steps_value, use_teacache_value, seed_value, cfg_value, rs_value, gpu_memory_preservation_value, mp4_crf_value
+    return prompt_text, n_prompt_text, gr.update(choices=[item['prompt'] for item in quick_prompts], value=prompt_text), video_length, gs_value, steps_value, use_teacache_value, seed_value, cfg_value, rs_value, gpu_memory_preservation_value, mp4_crf_value, keep_temp_png_value, keep_temp_mp4_value, keep_temp_json_value
 
 def delete_quick_prompt(prompt_text):
     global quick_prompts
@@ -818,18 +858,21 @@ stream = AsyncStream()
 outputs_folder = './outputs/'
 os.makedirs(outputs_folder, exist_ok=True)
 
-def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool = False, keep_temp_mp4: bool = False) -> None:
+def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool = False, keep_temp_mp4: bool = False, keep_temp_json: bool = False) -> None:
     """
     Deletes all '<job_id>_<n>.mp4' in outputs_folder except the one with the largest n.
-    Also deletes the '<job_id>.png' file.
+    Also deletes the '<job_id>.png' file and '<job_id>.json' file.
     If keep_temp_png is True, no PNG file will be deleted.
     If keep_temp_mp4 is True, no MP4 files will be deleted.
+    If keep_temp_json is True, no JSON file will be deleted.
     """
-    print(f"clean_up_temp_mp4png called with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}")
+    print(f"clean_up_temp_mp4png called with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
     if keep_temp_png:
         print(f"Keeping temporary PNG file for job {job_id} as requested")
     if keep_temp_mp4:
         print(f"Keeping temporary MP4 files for job {job_id} as requested")
+    if keep_temp_json:
+        print(f"Keeping temporary JSON file for job {job_id} as requested")
 
     # Delete the PNG file
     png_path = os.path.join(outputs_folder, f'{job_id}.png')
@@ -839,6 +882,15 @@ def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool =
             print(f"Deleted PNG file: {png_path}")
     except OSError as e:
         print(f"Failed to delete PNG file {png_path}: {e}")
+
+    # Delete the JSON file
+    json_path = os.path.join(outputs_folder, f'{job_id}.json')
+    try:
+        if os.path.exists(json_path) and not keep_temp_json:
+            os.remove(json_path)
+            print(f"Deleted JSON file: {json_path}")
+    except OSError as e:
+        print(f"Failed to delete JSON file {json_path}: {e}")
 
     # regex to grab the trailing number
     pattern = re.compile(rf'^{re.escape(job_id)}_(\d+)\.mp4$')
@@ -1017,7 +1069,7 @@ def mark_job_pending(job):
         return gr.update(), gr.update()
 
 @torch.no_grad()
-def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4):
+def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
     total_latent_sections = (total_second_length * 30) / (latent_window_size * 4)
     total_latent_sections = int(max(round(total_latent_sections), 1))
 
@@ -1075,7 +1127,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         metadata = PngInfo()
         metadata.add_text("prompt", prompt)
         metadata.add_text("negative_prompt", n_prompt) 
-        metadata.add_text("seed", str(seed))
+        metadata.add_text("seed", str(seed))  # This will now be the random seed if it was -1
         metadata.add_text("length", str(total_second_length))
         metadata.add_text("latent_window_size", str(latent_window_size))
         metadata.add_text("steps", str(steps))
@@ -1087,6 +1139,27 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         metadata.add_text("mp4_crf", str(mp4_crf))
 
         Image.fromarray(input_image_np).save(os.path.join(outputs_folder, f'{job_id}.png'), pnginfo=metadata)
+
+        # Save job parameters to JSON file
+        job_params = {
+            "prompt": prompt,
+            "negative_prompt": n_prompt,
+            "seed": seed,  # This will now be the random seed if it was -1
+            "video_length": total_second_length,
+            "latent_window_size": latent_window_size,
+            "steps": steps,
+            "cfg": cfg,
+            "gs": gs,
+            "rs": rs,
+            "gpu_memory_preservation": gpu_memory_preservation,
+            "use_teacache": use_teacache,
+            "mp4_crf": mp4_crf,
+            "keep_temp_png": keep_temp_png,
+            "keep_temp_mp4": keep_temp_mp4,
+            "keep_temp_json": keep_temp_json
+        }
+        with open(os.path.join(outputs_folder, f'{job_id}.json'), 'w') as f:
+            json.dump(job_params, f, indent=2)
 
         input_image_pt = torch.from_numpy(input_image_np).float() / 127.5 - 1
         input_image_pt = input_image_pt.permute(2, 0, 1)[None, :, None]
@@ -1118,7 +1191,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         # Sampling
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Start sampling ...'))))
 
-        rnd = torch.Generator("cpu").manual_seed(seed)
+        rnd = torch.Generator("cpu").manual_seed(seed)  # This will now be the random seed if it was -1
         num_frames = latent_window_size * 4 - 3
 
         history_latents = torch.zeros(size=(1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32).cpu()
@@ -1250,8 +1323,8 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             stream.output_queue.push(('file', output_filename))
 
             if is_last_section:
-                print(f"Calling clean_up_temp_mp4png with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}")
-                clean_up_temp_mp4png(job_id, outputs_folder, keep_temp_png, keep_temp_mp4)
+                print(f"Calling clean_up_temp_mp4png with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
+                clean_up_temp_mp4png(job_id, outputs_folder, keep_temp_png, keep_temp_mp4, keep_temp_json)
                 break
 
     except Exception as e:
@@ -1311,8 +1384,8 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
 
 
-def process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4):
-    print(f"process called with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}")
+def process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
+    print(f"process called with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
     global stream
     
     # Initialize variables
@@ -1331,6 +1404,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     process_teacache = use_teacache
     process_keep_temp_png = keep_temp_png
     process_keep_temp_mp4 = keep_temp_mp4
+    process_keep_temp_json = keep_temp_json
     process_mp4_crf = mp4_crf
     
     # First check for pending jobs
@@ -1360,7 +1434,8 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     status="pending",
                     mp4_crf=mp4_crf,
                     keep_temp_png=keep_temp_png,
-                    keep_temp_mp4=keep_temp_mp4
+                    keep_temp_mp4=keep_temp_mp4,
+                    keep_temp_json=keep_temp_json
                 )
                 if job_id is not None:
                     # Create thumbnail for the job
@@ -1400,7 +1475,8 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 status="pending",
                 mp4_crf=mp4_crf,
                 keep_temp_png=keep_temp_png,
-                keep_temp_mp4=keep_temp_mp4
+                keep_temp_mp4=keep_temp_mp4,
+                keep_temp_json=keep_temp_json
             )
             if job_id is not None:
                 # Create thumbnail for the job
@@ -1447,6 +1523,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         process_prompt = next_job.prompt if hasattr(next_job, 'prompt') else prompt
         process_n_prompt = next_job.n_prompt if hasattr(next_job, 'n_prompt') else n_prompt
         process_seed = next_job.seed if hasattr(next_job, 'seed') else seed
+        # Generate random seed if seed is -1
+        if process_seed == -1:
+            process_seed = random.randint(0, 2**32 - 1)
+            # Update the job's seed in the queue
+            next_job.seed = process_seed
+            save_queue()
         process_length = next_job.video_length if hasattr(next_job, 'video_length') else total_second_length
         process_steps = next_job.steps if hasattr(next_job, 'steps') else steps
         process_cfg = next_job.cfg if hasattr(next_job, 'cfg') else cfg
@@ -1456,8 +1538,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         process_teacache = next_job.use_teacache if hasattr(next_job, 'use_teacache') else use_teacache
         process_keep_temp_png = next_job.keep_temp_png if hasattr(next_job, 'keep_temp_png') else keep_temp_png
         process_keep_temp_mp4 = next_job.keep_temp_mp4 if hasattr(next_job, 'keep_temp_mp4') else keep_temp_mp4
+        process_keep_temp_json = next_job.keep_temp_json if hasattr(next_job, 'keep_temp_json') else keep_temp_json
         process_mp4_crf = next_job.mp4_crf if hasattr(next_job, 'mp4_crf') else mp4_crf
-        print(f"Processing pending job with keep_temp_png={process_keep_temp_png}, keep_temp_mp4={process_keep_temp_mp4}")
+        print(f"Processing pending job with keep_temp_png={process_keep_temp_png}, keep_temp_mp4={process_keep_temp_mp4}, keep_temp_json={process_keep_temp_json}")
     else:
         # No input image and no pending jobs
         print("No input image and no pending jobs to process")
@@ -1476,11 +1559,11 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     
     # Start processing
     stream = AsyncStream()
-    print(f"Starting worker with keep_temp_png={process_keep_temp_png}, keep_temp_mp4={process_keep_temp_mp4}")
+    print(f"Starting worker with keep_temp_png={process_keep_temp_png}, keep_temp_mp4={process_keep_temp_mp4}, keep_temp_json={process_keep_temp_json}")
     async_run(worker, process_image, process_prompt, process_n_prompt, process_seed, 
              process_length, latent_window_size, process_steps, 
              process_cfg, process_gs, process_rs, 
-             process_gpu_memory_preservation, process_teacache, process_mp4_crf, process_keep_temp_png, process_keep_temp_mp4)
+             process_gpu_memory_preservation, process_teacache, process_mp4_crf, process_keep_temp_png, process_keep_temp_mp4, process_keep_temp_json)
     
     # Initial yield with updated queue display and button states
     yield (
@@ -1540,7 +1623,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     # Only mark as completed if it's not already marked as failed
                     if current_job.status != "failed":
                         mark_job_completed(current_job)
-                        clean_up_temp_mp4png(current_job.job_id, outputs_folder, keep_temp_png, keep_temp_mp4)
+                        clean_up_temp_mp4png(current_job.job_id, outputs_folder, keep_temp_png, keep_temp_mp4, keep_temp_json)
                         cleanup_orphaned_files()
                         queue_table_update, queue_display_update = mark_job_completed(current_job)
                         save_queue()
@@ -1586,13 +1669,14 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         next_teacache = next_job.use_teacache if hasattr(next_job, 'use_teacache') else use_teacache
                         next_keep_temp_png = next_job.keep_temp_png if hasattr(next_job, 'keep_temp_png') else keep_temp_png
                         next_keep_temp_mp4 = next_job.keep_temp_mp4 if hasattr(next_job, 'keep_temp_mp4') else keep_temp_mp4
+                        next_keep_temp_json = next_job.keep_temp_json if hasattr(next_job, 'keep_temp_json') else keep_temp_json
                         next_mp4_crf = next_job.mp4_crf if hasattr(next_job, 'mp4_crf') else mp4_crf
                         
                         # Process next job
                         async_run(worker, next_image, next_prompt, next_n_prompt, next_seed, 
                                  next_length, latent_window_size, next_steps, 
                                  next_cfg, next_gs, next_rs, 
-                                 next_gpu_memory_preservation, next_teacache, next_mp4_crf, next_keep_temp_png, next_keep_temp_mp4)
+                                 next_gpu_memory_preservation, next_teacache, next_mp4_crf, next_keep_temp_png, next_keep_temp_mp4, next_keep_temp_json)
                     else:
                         job_queue[:] = [job for job in job_queue if job.status != "completed"]
                         save_queue()
@@ -1709,7 +1793,7 @@ def end_process():
         traceback.print_exc()
         return gr.update(), gr.update(), gr.update(interactive=True)  # queue_button (always enabled)
 
-def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, seed, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_mp4):
+def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, seed, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
     """Handle adding a new job to the queue"""
     if input_image is None or not prompt:
         return gr.update(), gr.update(), gr.update(interactive=True)  # queue_button (always enabled)
@@ -1737,7 +1821,8 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
                     status="pending",
                     mp4_crf=mp4_crf,
                     keep_temp_png=keep_temp_png,
-                    keep_temp_mp4=keep_temp_mp4
+                    keep_temp_mp4=keep_temp_mp4,
+                    keep_temp_json=keep_temp_json
                 )
                 if job_id is not None:
                     # Create thumbnail for the job
@@ -1777,7 +1862,8 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
                 status="pending",
                 mp4_crf=mp4_crf,
                 keep_temp_png=keep_temp_png,
-                keep_temp_mp4=keep_temp_mp4
+                keep_temp_mp4=keep_temp_mp4,
+                keep_temp_json=keep_temp_json
             )
             if job_id is not None:
                 # Create thumbnail for the job
@@ -2009,11 +2095,114 @@ def handle_queue_action(evt: gr.SelectData):
 
 
 css = make_progress_bar_css() + """
+.gradio-gallery-container {
+    max-height: 600px !important;
+    overflow-y: auto !important;
+    padding: 10px;
+}
+.gradio-gallery-container::-webkit-scrollbar {
+    width: 8px !important;
+}
+.gradio-gallery-container::-webkit-scrollbar-track {
+    background: #f0f0f0 !important;
+}
+.gradio-gallery-container::-webkit-scrollbar-thumb {
+    background-color: #666 !important;
+    border-radius: 4px !important;
+}
+.queue-gallery .gallery-item {
+    margin: 5px;
+}
+
 /* Hide table headers */
 .gradio-dataframe thead {
     display: none !important;
 }
 
+/* Prevent Gradio's wrapper from centering the grid */
+.gradio-dataframe > div {
+    display: flex !important;
+    align-items: flex-start !important;
+}
+
+/* Force AG-Grid to fill its container */
+.ag-theme-gradio .ag-root-wrapper {
+    height: 100% !important;
+}
+.ag-theme-gradio .ag-body-viewport,
+.ag-theme-gradio .ag-center-cols-viewport {
+    height: 100% !important;
+}
+
+/* Set each row to 100px tall */
+.ag-theme-gradio .ag-body-viewport .ag-center-cols-container .ag-row {
+    height: 100px !important;
+}
+
+/* Vertically center the prompt text in column 7 */
+.ag-theme-gradio .ag-center-cols-container .ag-row .ag-cell:nth-child(7) {
+    display: flex !important;
+    align-items: center !important;
+    padding: 0 8px !important;
+}
+
+/* First column fixed width */
+.gradio-dataframe th:first-child,
+.gradio-dataframe td:first-child {
+    width: 150px !important;
+    min-width: 150px !important;
+}
+
+/* Remove orange selection highlight */
+.gradio-dataframe td.selected,
+.gradio-dataframe td:focus,
+.gradio-dataframe tr.selected td,
+.gradio-dataframe tr:focus td {
+    background-color: transparent !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* Style the arrow buttons */
+.gradio-dataframe td:nth-child(2),
+.gradio-dataframe td:nth-child(3),
+.gradio-dataframe td:nth-child(4),
+.gradio-dataframe td:nth-child(5),
+.gradio-dataframe td:nth-child(6),
+.gradio-dataframe th:nth-child(2),
+.gradio-dataframe th:nth-child(3),
+.gradio-dataframe th:nth-child(4),
+.gradio-dataframe th:nth-child(5),
+.gradio-dataframe th:nth-child(6) {
+    cursor: pointer;
+    color: #666;
+    font-weight: bold;
+    transition: color 0.2s;
+    width: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+    text-align: center !important;
+    padding: 0 !important;
+}
+.gradio-dataframe td:nth-child(2):hover,
+.gradio-dataframe td:nth-child(3):hover,
+.gradio-dataframe td:nth-child(4):hover,
+.gradio-dataframe td:nth-child(5):hover,
+.gradio-dataframe td:nth-child(6):hover {
+    color: #000;
+}
+
+/* Align all headers */
+.gradio-dataframe th {
+    text-align: center !important;
+    padding: 8px !important;
+}
+
+/* Column‐width overrides */
+.gradio-dataframe th:nth-child(7) { width:  80px !important; min-width:  80px !important; }
+.gradio-dataframe th:nth-child(8) { width:  60px !important; min-width:  60px !important; }
+.gradio-dataframe th:nth-child(9) { width: 300px !important; min-width: 300px !important; text-align: left !important; }
+.gradio-dataframe th:nth-child(10){ width:  60px !important; min-width:  60px !important; }
 """
 
 
@@ -2060,6 +2249,7 @@ with block:
                         mp4_crf = gr.Slider(label="MP4 Compression", minimum=0, maximum=100, value=16, step=1, info="Lower means better quality. 0 is uncompressed. Change to 16 if you get black outputs. ")
                         keep_temp_png = gr.Checkbox(label="Keep temp PNG file", value=False, info="If checked, temporary PNG file will not be deleted after processing")
                         keep_temp_mp4 = gr.Checkbox(label="Keep temp MP4 files", value=False, info="If checked, temporary MP4 files will not be deleted after processing")
+                        keep_temp_json = gr.Checkbox(label="Keep temp JSON file", value=False, info="If checked, temporary JSON file will not be deleted after processing")
 
                 with gr.Column():
                     with gr.Row():
@@ -2114,6 +2304,7 @@ with block:
                     settings_mp4_crf = gr.Slider(label="MP4 Compression", minimum=0, maximum=100, value=Config.DEFAULT_MP4_CRF, step=1)
                     settings_keep_temp_png = gr.Checkbox(label="Keep temp PNG", value=Config.DEFAULT_KEEP_TEMP_PNG)
                     settings_keep_temp_mp4 = gr.Checkbox(label="Keep temp MP4", value=Config.DEFAULT_KEEP_TEMP_MP4)
+                    settings_keep_temp_json = gr.Checkbox(label="Keep temp JSON", value=Config.DEFAULT_KEEP_TEMP_JSON)
                     
                     with gr.Row():
                         save_defaults_button = gr.Button("Save as Defaults")
@@ -2125,7 +2316,7 @@ with block:
         inputs=[
             settings_use_teacache, settings_seed, settings_video_length, settings_steps,
             settings_cfg, settings_gs, settings_rs, settings_gpu_memory, settings_mp4_crf,
-            settings_keep_temp_png, settings_keep_temp_mp4
+            settings_keep_temp_png, settings_keep_temp_mp4, settings_keep_temp_json
         ],
         outputs=[gr.Markdown()]
     )
@@ -2136,12 +2327,12 @@ with block:
         outputs=[
             settings_use_teacache, settings_seed, settings_video_length, settings_steps,
             settings_cfg, settings_gs, settings_rs, settings_gpu_memory, settings_mp4_crf,
-            settings_keep_temp_png, settings_keep_temp_mp4
+            settings_keep_temp_png, settings_keep_temp_mp4, settings_keep_temp_json
         ]
     )
 
     # Set default prompt and length
-    default_prompt, default_n_prompt, default_length, default_gs, default_steps, default_teacache, default_seed, default_cfg, default_rs, default_gpu_memory, default_mp4_crf = get_default_prompt()
+    default_prompt, default_n_prompt, default_length, default_gs, default_steps, default_teacache, default_seed, default_cfg, default_rs, default_gpu_memory, default_mp4_crf, default_keep_temp_png, default_keep_temp_mp4, default_keep_temp_json = get_default_prompt()
     prompt.value = default_prompt
     n_prompt.value = default_n_prompt
     total_second_length.value = default_length
@@ -2153,14 +2344,15 @@ with block:
     rs.value = default_rs
     gpu_memory_preservation.value = default_gpu_memory
     mp4_crf.value = default_mp4_crf
-    keep_temp_png.value = Config.DEFAULT_KEEP_TEMP_PNG
-    keep_temp_mp4.value = Config.DEFAULT_KEEP_TEMP_MP4
+    keep_temp_png.value = default_keep_temp_png
+    keep_temp_mp4.value = default_keep_temp_mp4
+    keep_temp_json.value = default_keep_temp_json
 
     # Connect UI elements
     save_prompt_button.click(
         save_quick_prompt,
-        inputs=[prompt, n_prompt, total_second_length, gs, steps, use_teacache, seed, cfg, rs, gpu_memory_preservation, mp4_crf],
-        outputs=[prompt, n_prompt, quick_list, total_second_length, gs, steps, use_teacache, seed, cfg, rs, gpu_memory_preservation, mp4_crf],
+        inputs=[prompt, n_prompt, total_second_length, gs, steps, use_teacache, seed, cfg, rs, gpu_memory_preservation, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json],
+        outputs=[prompt, n_prompt, quick_list, total_second_length, gs, steps, use_teacache, seed, cfg, rs, gpu_memory_preservation, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json],
         queue=False
     )
     delete_prompt_button.click(
@@ -2207,7 +2399,7 @@ with block:
     # Connect queue actions
     queue_table.select(fn=handle_queue_action, inputs=[], outputs=[queue_table, queue_display])
 
-    ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4]
+    ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json]
     start_button.click(
         fn=process, 
         inputs=ips, 
@@ -2219,7 +2411,7 @@ with block:
     )
     queue_button.click(
         fn=add_to_queue_handler,
-        inputs=[input_image, prompt, n_prompt, total_second_length, seed, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_mp4],
+        inputs=[input_image, prompt, n_prompt, total_second_length, seed, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json],
         outputs=[queue_table, queue_display, queue_button]
     )
 
@@ -2237,3 +2429,5 @@ block.launch(
     inbrowser=args.inbrowser
 )
 
+# iface = gr.Interface(fn=greet, inputs="text", outputs="text")
+# iface.launch(share=True)
