@@ -12,7 +12,16 @@
 - **Batch Upload**  
   Upload several images at once, enter your prompt & settings, then “Add to Queue” to generate a batch of 1 jobe for each image.
 
-- **Quick-List Prompts**  
+- **Clone a Job**  
+  select a pending job in the queue and click the clone icon, it will create a duplicate job.
+ 
+- **Edit a Job**  
+  select a pending job in the queue and click the edit icon, it will open a settings pannel beloww where you can edit the prompt and parameters.
+  
+- **delete a Job**  
+  select a pending job in the queue and click the red X icon,(note it will not end the job if it is alreaddy processing.
+   
+- **Quick-List Prompts**  )
   Save your favorite prompts & settings for instant recall.  
   • Delete unwanted entries at any time.  
   • Select from saved prompts to update the UI before adding new jobs.
