@@ -61,12 +61,11 @@
 ---
 
 ## 📸 Screenshots
+![Screenshot 2025-04-27 171659](https://github.com/user-attachments/assets/f4b840d6-4dc1-4bba-a2cb-4e715d0843c0)
 
-![Main UI – QueueItUp Controls](https://github.com/user-attachments/assets/45617d1d-c825-436b-bfa5-af8359a3c541)
+![Screenshot 2025-04-27 170353](https://github.com/user-attachments/assets/12eb5e3a-f3da-4dc7-8afb-429cae2e21b9)
 
-![Queue Sort Order Tab](https://github.com/user-attachments/assets/14f58aeb-33da-4e79-b3bb-1cf294edc7e0)
-
-
+![Screenshot 2025-04-27 171830](https://github.com/user-attachments/assets/2fa31981-a7d6-43ec-9762-f7782a776fd6)
 
 # FramePack
 <p align="center">
