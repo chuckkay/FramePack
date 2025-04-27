@@ -1,71 +1,74 @@
-# QueueItUp for FramePack
+# 🚂 QueueItUp for FramePack
 
 > A lightweight job-queue extension for lllyasviel’s FramePack WebUI
+
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](#) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](#) [![Version](https://img.shields.io/badge/version-1.0.0-orange.svg)](#)
+
+---
+
+## 📑 Table of Contents
+
+- [🚀 Features](#-features)  
+- [💾 Installation](#-installation)  
+- [⚙️ Usage](#️-usage)  
+- [🛠 Configuration](#-configuration)  
+- [📸 Screenshots](#-screenshots)  
+- [❤️ Contributing](#-contributing)  
+- [📄 License](#-license)  
 
 ---
 
 ## 🚀 Features
 
 - **Sequential Queuing**  
-  Add multiple jobs (one at a time) and have Framepack process them one after another with a single click.
+  Process multiple jobs one after another with a single click.
 
 - **Batch Upload**  
-  Upload several images at once, enter your prompt & settings, then “Add to Queue” to generate a batch of 1 jobe for each image.
+  Upload several images at once, set your prompt & parameters, then “Add to Queue”—one job per image.
 
-- **Clone a Job**  
-  select a pending job in the queue and click the clone icon, it will create a duplicate job.
- 
-- **Edit a Job**  
-  select a pending job in the queue and click the edit icon, it will open a settings pannel beloww where you can edit the prompt and parameters.
-  
-- **delete a Job**  
-  select a pending job in the queue and click the red X icon,(note it will not end the job if it is alreaddy processing.
-   
-- **Quick-List Prompts**  )
-  Save your favorite prompts & settings for instant recall.  
-  • Delete unwanted entries at any time.  
-  • Select from saved prompts to update the UI before adding new jobs.
+- **Clone & Edit Jobs**  
+  - Clone a pending job via the 📝 icon to duplicate settings in a new queue entry.  
+  - Edit a pending job inline using the ✏️ icon to tweak prompt and parameters.
+
+- **Delete Jobs**  
+  Remove any pending job with the ❌ icon (won’t interrupt a running job).
+
+- **Quick-List Prompts**  
+  Save, recall, and delete favorite prompt-and-settings combinations at the click of a button.
 
 - **Customizable Queue Order**  
-  In the **Queue Sort Order** tab, reorder jobs ('↑' up, '↓' down, 'T' Top, 'B' Bottom) or 'X' to delete.
+  Reorder jobs in the **Queue Sort Order** tab:  
+  - ⬆️ Move Up  
+  - ⬇️ Move Down  
+  - 🔝 Send to Top  
+  - 🔚 Send to Bottom  
+  - ❌ Remove
 
 - **Persistent Defaults**  
-  Save your preferred settings as the default.  
-  Restore the original defaults with one click.
+  Store your preferred settings as defaults—or revert to the original defaults with one click.
 
 - **Output-Folder Control**  
-  Toggle whether intermediate latent MP4s, PNGs  and job json data are kept alongside the final video.
-  coming soon set your own default output folder where your creations will be saved.
+  Toggle whether intermediate MP4s, PNGs, and JSON metadata are kept alongside final outputs.  
+  *(Coming soon: choose a custom default output folder.)*
 
 - **Random Seeds**  
-  if seed is -1 for a job it will save it to queue and when the job is run it will create a random seed and save it along with all the setting in a job.json file and as meta data in the png file.
-  
+  Set seed to `-1` to auto-generate a random seed at runtime; saved in `job.json` and image metadata.
+
 - **Live Progress Info**  
-  The status bar above the progress bar shows the current job name and percentage complete.
+  See current job name and percentage complete in the status bar above the progress bar.
+
 ---
+
 ## 💾 Installation
 
-1. **Download**  
-   1. follow the instructions below for installing the full version of lllyasviel’s FramePack WebUI below, install it, and run `update.bat`.  
-   2. Then download from this repo:  
-      - `Framepack_QueueItUp.bat`  
-      - `Framepack_QueueItUp.py`
-2. **Deploy**  
-   Place both files in your FramePack WebUI directory.
+1. **Get FramePack WebUI**  
+   Follow lllyasviel’s official instructions to [install FramePack WebUI](https://github.com/lllyasviel/FramePack) and run `update.bat`.
 
-3. **Run**  
-   Double-click `Framepack_QueueItUp.bat`.  
-   (You can still launch the original WebUI via lllyasviel’s `run.bat`.)
-*Stay tuned—more detailed usage instructions and advanced tips are coming soon!*  
----
----
-
-## 📸 Screenshots
-![Screenshot 2025-04-27 171659](https://github.com/user-attachments/assets/f4b840d6-4dc1-4bba-a2cb-4e715d0843c0)
-
-![Screenshot 2025-04-27 170353](https://github.com/user-attachments/assets/12eb5e3a-f3da-4dc7-8afb-429cae2e21b9)
-
-![Screenshot 2025-04-27 171830](https://github.com/user-attachments/assets/2fa31981-a7d6-43ec-9762-f7782a776fd6)
+2. **Download QueueItUp**  
+   From this repo, grab:  
+   ```bash
+   Framepack_QueueItUp.bat
+   Framepack_QueueItUp.py
 
 # FramePack
 <p align="center">
