@@ -1523,8 +1523,11 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         process_n_prompt = next_job.n_prompt if hasattr(next_job, 'n_prompt') else n_prompt
         process_seed = next_job.seed if hasattr(next_job, 'seed') else seed
         # Generate random seed if seed is -1, but don't save it back to the queue
+
         if process_seed == -1:
-            process_seed = random.randint(0, 2**32 - 1)
+            temp_seed = random.randint(0, 2**32 - 1)
+            process_seed = temp_seed  # Use temp_seed for processing
+
         process_length = next_job.video_length if hasattr(next_job, 'video_length') else total_second_length
         process_steps = next_job.steps if hasattr(next_job, 'steps') else steps
         process_cfg = next_job.cfg if hasattr(next_job, 'cfg') else cfg
@@ -1554,7 +1557,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     
     # Start processing
     stream = AsyncStream()
-    print(f"Starting worker with keep_temp_png={process_keep_temp_png}, keep_temp_mp4={process_keep_temp_mp4}, keep_temp_json={process_keep_temp_json}")
+    print(f"Starting worker")
     async_run(worker, process_image, process_prompt, process_n_prompt, process_seed, 
              process_length, latent_window_size, process_steps, 
              process_cfg, process_gs, process_rs, 
