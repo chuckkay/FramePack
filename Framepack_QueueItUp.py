@@ -34,21 +34,54 @@ from diffusers_helper.clip_vision import hf_clip_vision_encode
 from diffusers_helper.bucket_tools import find_nearest_bucket
 import shutil
 
+
+# Path to settings file
+SETTINGS_FILE = os.path.join(os.getcwd(), 'settings.ini')
+
+
+# Path to the quick prompts JSON file
+PROMPT_FILE = os.path.join(os.getcwd(), 'quick_prompts.json')
+
+# Queue file path
+QUEUE_FILE = os.path.join(os.getcwd(), 'job_queue.json')
+
+# Temp directory for queue images
+temp_queue_images = os.path.join(os.getcwd(), 'temp_queue_images')
+os.makedirs(temp_queue_images, exist_ok=True)
+
+#todo make add these items to the settings ini and save tab
+outputs_folder = './outputs/' #this is the fall back directory on restore defaults
+job_history_folder = './job_history/'
+debug_mode = False
+
+
+
+
+
+os.makedirs(outputs_folder, exist_ok=True)
+os.makedirs(job_history_folder, exist_ok=True)
+
+
+
+
+# Initialize job queue as a list
+job_queue = []
+
 # ANSI color codes
 YELLOW = '\033[93m'
 RED = '\033[31m'
 RESET = '\033[0m'
 
 def debug_print(message):
-    """Print debug messages in yellow color"""
-    print(f"{YELLOW}[DEBUG] {message}{RESET}")
+    if debug_mode:
+        """Print debug messages in yellow color"""
+        print(f"{YELLOW}[DEBUG] {message}{RESET}")
     
 def alert_print(message):
     """ALERT debug messages in red color"""
     print(f"{RED}[DEBUG] {message}{RESET}")
     
-# Path to settings file
-SETTINGS_FILE = os.path.join(os.getcwd(), 'settings.ini')
+
 
 def load_settings():
     """Load settings from settings.ini file"""
@@ -69,6 +102,8 @@ def load_settings():
                 config.write(f)
     
     return config
+# Load settings at startup
+settings_config = load_settings()
 
 def save_settings(config):
     """Save settings to settings.ini file"""
@@ -241,22 +276,7 @@ class Config:
             'keep_temp_json': cls.DEFAULT_KEEP_TEMP_JSON
         }
 
-# Load settings at startup
-settings_config = load_settings()
-
 Config = Config.from_settings(settings_config)
-
-
-# Path to the quick prompts JSON file
-PROMPT_FILE = os.path.join(os.getcwd(), 'quick_prompts.json')
-
-# Queue file path
-QUEUE_FILE = os.path.join(os.getcwd(), 'job_queue.json')
-
-# Temp directory for queue images
-temp_queue_images = os.path.join(os.getcwd(), 'temp_queue_images')
-os.makedirs(temp_queue_images, exist_ok=True)
-
 # Default prompts using Config class
 DEFAULT_PROMPTS = [
     Config.get_default_prompt_dict(),
@@ -277,7 +297,6 @@ DEFAULT_PROMPTS = [
         'keep_temp_json': Config.DEFAULT_KEEP_TEMP_JSON
     }
 ]
-
 # Load existing prompts or create the file with defaults
 if os.path.exists(PROMPT_FILE):
     with open(PROMPT_FILE, 'r') as f:
@@ -362,8 +381,7 @@ class QueuedJob:
             alert_print(f"Error creating job from dict: {str(e)}")
             return None
 
-# Initialize job queue as a list
-job_queue = []
+
 
 def save_queue():
     """Save the current queue state to JSON file"""
@@ -705,7 +723,7 @@ def reset_processing_jobs():
         processing_jobs = []
         for job in job_queue:
             if job.status == "processing":
-                #debug_print(f"Found job {job.job_hex} with status {job.status}")
+                debug_print(f"Found job {job.job_hex} with status {job.status}")
                 mark_job_pending(job)
                 processing_jobs.append(job)
         
@@ -723,7 +741,7 @@ def reset_processing_jobs():
         failed_jobs = []
         for job in job_queue:
             if job.status == "failed":
-                #debug_print(f"Found job {job.job_hex} with status {job.status}")
+                debug_print(f"Found job {job.job_hex} with status {job.status}")
                 mark_job_pending(job)
                 failed_jobs.append(job)
         
@@ -735,7 +753,7 @@ def reset_processing_jobs():
         # Add them back at the top in reverse order (so they maintain their relative order)
         for job in reversed(failed_jobs):
             job_queue.insert(0, job)
-            #debug_print(f"marked previously failed job as pending and Moved job {job.job_hex} to top of queue")
+            debug_print(f"marked previously failed job as pending and Moved job {job.job_hex} to top of queue")
         
         # Update in-memory queue and save to JSON
         save_queue()
@@ -889,12 +907,7 @@ else:
 
 stream = AsyncStream()
 
-#make the output_folder path value saved in setting.ini and the value loaded from setting.ini on startup, and changable in the settings tab
 
-outputs_folder = './outputs/' #this is the fall back directory on restore defaults
-job_history_folder = './job_history/'
-os.makedirs(outputs_folder, exist_ok=True)
-os.makedirs(job_history_folder, exist_ok=True)
 
 def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool = False, keep_temp_mp4: bool = False, keep_temp_json: bool = False) -> None:
     """
@@ -904,20 +917,20 @@ def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool =
     If keep_temp_mp4 is True, no MP4 files will be deleted.
     If keep_temp_json is True, no JSON file will be deleted.
     """
-    #debug_print(f"clean_up_temp_mp4png called with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
-    # if keep_temp_png:
-        # #debug_print(f"Keeping temporary PNG file for job {job_id} as requested")
-    # if keep_temp_mp4:
-        # #debug_print(f"Keeping temporary MP4 files for job {job_id} as requested")
-    # if keep_temp_json:
-        # #debug_print(f"Keeping temporary JSON file for job {job_id} as requested")
+    debug_print(f"clean_up_temp_mp4png called with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
+    if keep_temp_png:
+        debug_print(f"Keeping temporary PNG file for job {job_id} as requested")
+    if keep_temp_mp4:
+        debug_print(f"Keeping temporary MP4 files for job {job_id} as requested")
+    if keep_temp_json:
+        debug_print(f"Keeping temporary JSON file for job {job_id} as requested")
 
     # Delete the PNG file
     png_path = os.path.join(job_history_folder, f'{job_id}.png')
     try:
         if os.path.exists(png_path) and not keep_temp_png:
             os.remove(png_path)
-            #debug_print(f"Deleted PNG file: {png_path}")
+            debug_print(f"Deleted PNG file: {png_path}")
     except OSError as e:
         alert_print(f"Failed to delete PNG file {png_path}: {e}")
 
@@ -926,7 +939,7 @@ def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool =
     try:
         if os.path.exists(json_path) and not keep_temp_json:
             os.remove(json_path)
-            #debug_print(f"Deleted JSON file: {json_path}")
+            debug_print(f"Deleted JSON file: {json_path}")
     except OSError as e:
         alert_print(f"Failed to delete JSON file {json_path}: {e}")
 
@@ -956,7 +969,7 @@ def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool =
                 
             except OSError as e:
                 alert_print(f"Failed to delete {fname}: {e}")
-    #debug_print(f"Deleted old smaller temp videos")
+    debug_print(f"Deleted old smaller temp videos")
 
 def create_status_thumbnail(image_path, status, border_color, status_text):
     """Create a thumbnail with status-specific border and text"""
@@ -1153,7 +1166,7 @@ def mark_job_pending(job):
 
 @torch.no_grad()
 def worker(input_image, prompt, n_prompt, process_seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
-    #debug_print(f"Worker received seed value: {process_seed}")
+    debug_print(f"Worker received seed value: {process_seed}")
     total_latent_sections = (total_second_length * 30) / (latent_window_size * 4)
     total_latent_sections = int(max(round(total_latent_sections), 1))
 
@@ -1296,7 +1309,7 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
                 stream.output_queue.push(('end', None))
                 return
 
-            #debug_print(f'latent_padding_size = {latent_padding_size}, is_last_section = {is_last_section}')
+            debug_print(f'latent_padding_size = {latent_padding_size}, is_last_section = {is_last_section}')
 
             indices = torch.arange(0, sum([1, latent_padding_size, latent_window_size, 1, 2, 16])).unsqueeze(0)
             clean_latent_indices_pre, blank_indices, latent_indices, clean_latent_indices_post, clean_latent_2x_indices, clean_latent_4x_indices = indices.split([1, latent_padding_size, latent_window_size, 1, 2, 16], dim=1)
@@ -1404,7 +1417,7 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
             stream.output_queue.push(('file', output_filename))
 
             if is_last_section:
-                #debug_print(f"Calling clean_up_temp_mp4png with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
+                debug_print(f"Calling clean_up_temp_mp4png with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
                 clean_up_temp_mp4png(job_id, outputs_folder, keep_temp_png, keep_temp_mp4, keep_temp_json)
                 break
 
@@ -1578,12 +1591,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         process_prompt = next_job.prompt if hasattr(next_job, 'prompt') else prompt
         process_n_prompt = next_job.n_prompt if hasattr(next_job, 'n_prompt') else n_prompt
         process_seed = next_job.seed if hasattr(next_job, 'seed') else seed
-        #debug_print(f"Job {next_job.job_hex} initial seed value: {process_seed}")
+        debug_print(f"Job {next_job.job_hex} initial seed value: {process_seed}")
         
         # Generate random seed if seed is -1
         if process_seed == -1:
             process_seed = random.randint(0, 2**32 - 1)
-            #debug_print(f"Generated new random seed for job {next_job.job_hex}: {process_seed}")
+            debug_print(f"Generated new random seed for job {next_job.job_hex}: {process_seed}")
             # # Update the job's seed in the queue this is wrong
             # next_job.seed = process_seed
             save_queue()
@@ -1717,9 +1730,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         # Generate random seed if seed is -1
                         if process_seed == -1:
                             process_seed = random.randint(0, 2**32 - 1)
-                            debug_print(f"Generated new random seed for job {next_job.job_hex}: {process_seed}")
-                            # Update the job's seed in the queue
-                            # next_job.seed = next_seed
+                            # debug_print(f"Generated new random seed for job {next_job.job_hex}: {process_seed}")
                             save_queue()
 
                         next_length = next_job.video_length if hasattr(next_job, 'video_length') else total_second_length
