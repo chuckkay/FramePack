@@ -1073,6 +1073,7 @@ def mark_job_pending(job):
 
 @torch.no_grad()
 def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
+    print(f"\n[DEBUG] Worker received seed value: {seed}")
     total_latent_sections = (total_second_length * 30) / (latent_window_size * 4)
     total_latent_sections = int(max(round(total_latent_sections), 1))
 
@@ -1158,8 +1159,22 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             "use_teacache": use_teacache,
             "mp4_crf": mp4_crf
         }
-        with open(os.path.join(outputs_folder, f'{job_id}.json'), 'w') as f:
-            json.dump(job_params, f, indent=2)
+        if keep_temp_json:
+            json_path = os.path.join(outputs_folder, f"{job_id}.json")
+            with open(json_path, 'w') as f:
+                json.dump({
+                    'prompt': prompt,
+                    'n_prompt': n_prompt,
+                    'seed': seed,  # This is the seed being saved to JSON
+                    'steps': steps,
+                    'cfg': cfg,
+                    'gs': gs,
+                    'rs': rs,
+                    'use_teacache': use_teacache,
+                    'gpu_memory_preservation': gpu_memory_preservation,
+                    'mp4_crf': mp4_crf
+                }, f, indent=4)
+            print(f"[DEBUG] Saved seed {seed} to JSON file: {json_path}")
 
         input_image_pt = torch.from_numpy(input_image_np).float() / 127.5 - 1
         input_image_pt = input_image_pt.permute(2, 0, 1)[None, :, None]
@@ -1522,11 +1537,15 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         process_prompt = next_job.prompt if hasattr(next_job, 'prompt') else prompt
         process_n_prompt = next_job.n_prompt if hasattr(next_job, 'n_prompt') else n_prompt
         process_seed = next_job.seed if hasattr(next_job, 'seed') else seed
-        # Generate random seed if seed is -1, but don't save it back to the queue
-
+        print(f"\n[DEBUG] Job {next_job.job_id} initial seed value: {process_seed}")
+        
+        # Generate random seed if seed is -1
         if process_seed == -1:
-            temp_seed = random.randint(0, 2**32 - 1)
-            process_seed = temp_seed  # Use temp_seed for processing
+            process_seed = random.randint(0, 2**32 - 1)
+            print(f"[DEBUG] Generated new random seed for job {next_job.job_id}: {process_seed}")
+            # Update the job's seed in the queue
+            next_job.seed = process_seed
+            save_queue()
 
         process_length = next_job.video_length if hasattr(next_job, 'video_length') else total_second_length
         process_steps = next_job.steps if hasattr(next_job, 'steps') else steps
@@ -1658,6 +1677,16 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         next_prompt = next_job.prompt if hasattr(next_job, 'prompt') else prompt
                         next_n_prompt = next_job.n_prompt if hasattr(next_job, 'n_prompt') else n_prompt
                         next_seed = next_job.seed if hasattr(next_job, 'seed') else seed
+                        print(f"\n[DEBUG] Job {next_job.job_id} initial seed value: {next_seed}")
+                        
+                        # Generate random seed if seed is -1
+                        if next_seed == -1:
+                            next_seed = random.randint(0, 2**32 - 1)
+                            print(f"[DEBUG] Generated new random seed for job {next_job.job_id}: {next_seed}")
+                            # Update the job's seed in the queue
+                            next_job.seed = next_seed
+                            save_queue()
+
                         next_length = next_job.video_length if hasattr(next_job, 'video_length') else total_second_length
                         next_steps = next_job.steps if hasattr(next_job, 'steps') else steps
                         next_cfg = next_job.cfg if hasattr(next_job, 'cfg') else cfg
@@ -2654,9 +2683,9 @@ with block:
         outputs=[queue_table, queue_display, queue_button]
     )
 
-    # Add these calls at startup
-    reset_processing_jobs()
-    cleanup_orphaned_files()
+# Add these calls at startup
+reset_processing_jobs()
+cleanup_orphaned_files()
 
 
 # Launch the interface
