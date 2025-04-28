@@ -905,12 +905,12 @@ def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool =
     If keep_temp_json is True, no JSON file will be deleted.
     """
     #debug_print(f"clean_up_temp_mp4png called with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
-    if keep_temp_png:
-        #debug_print(f"Keeping temporary PNG file for job {job_id} as requested")
-    if keep_temp_mp4:
-        #debug_print(f"Keeping temporary MP4 files for job {job_id} as requested")
-    if keep_temp_json:
-        #debug_print(f"Keeping temporary JSON file for job {job_id} as requested")
+    # if keep_temp_png:
+        # #debug_print(f"Keeping temporary PNG file for job {job_id} as requested")
+    # if keep_temp_mp4:
+        # #debug_print(f"Keeping temporary MP4 files for job {job_id} as requested")
+    # if keep_temp_json:
+        # #debug_print(f"Keeping temporary JSON file for job {job_id} as requested")
 
     # Delete the PNG file
     png_path = os.path.join(job_history_folder, f'{job_id}.png')
@@ -1181,21 +1181,16 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
         # Processing input image
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Image processing ...'))))
 
-        # # Handle Gallery tuple format
-        # if isinstance(input_image, tuple):
-            # input_image = input_image[0]  
-            # debug_print("Got the file path from the tuple")
-        # if isinstance(input_image, str):
-            # debug_print(" got image from a path")
-            # input_image = np.array(Image.open(input_image))
-        # elif isinstance(input_image, list):
-            # # If it's a list of tuples, get the first one
-            # if isinstance(input_image[0], tuple):
-                # input_image = np.array(Image.open(input_image[0][0]))
-                # debug_print(" got image from array")
-            # else:
-                # debug_print(" got image already an array")
-                # input_image = input_image[0]
+        # this section of code not needed i think
+        if isinstance(input_image, tuple):
+            input_image = input_image[0]
+        if isinstance(input_image, str):
+            input_image = np.array(Image.open(input_image))
+        elif isinstance(input_image, list):
+            if isinstance(input_image[0], tuple):
+                input_image = np.array(Image.open(input_image[0][0]))
+            else:
+                input_image = input_image[0]
 
         H, W, C = input_image.shape
         height, width = find_nearest_bucket(H, W, resolution=640)
@@ -1234,21 +1229,10 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
             "mp4_crf": mp4_crf
         }
         if keep_temp_json:
-            json_path = os.path.join(job_history_folder, f"{job_id}.json")
+            json_path = os.path.join(job_history_folder, f'{job_id}.json')
             with open(json_path, 'w') as f:
-                json.dump({
-                    'prompt': prompt,
-                    'n_prompt': n_prompt,
-                    'seed': process_seed,  # This is the seed being saved to JSON
-                    'steps': steps,
-                    'cfg': cfg,
-                    'gs': gs,
-                    'rs': rs,
-                    'use_teacache': use_teacache,
-                    'gpu_memory_preservation': gpu_memory_preservation,
-                    'mp4_crf': mp4_crf
-                }, f, indent=4)
-            #debug_print(f"[DEBUG] Saved seed {process_seed} to JSON file: {json_path}")
+                json.dump(job_params, f, indent=2)
+
 
         input_image_pt = torch.from_numpy(input_image_np).float() / 127.5 - 1
         input_image_pt = input_image_pt.permute(2, 0, 1)[None, :, None]
@@ -1341,7 +1325,7 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
                 percent_done = (current_time / total_second_length) * 100
                 desc = f'Current Job is running, Total generated frames: {int(max(0, total_generated_latent_frames * 4 - 3))}, Video length: {current_time:.2f} seconds of {total_second_length} at (FPS-30). The video is being extended now and is {percent_done:.1f}% done'
                 stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
-                return
+                return 
 
             try:
                 generated_latents = sample_hunyuan(
@@ -1433,28 +1417,28 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
             if job.status == "processing":
                 if job_failed:
                     job.status = "failed"
-                    # Create failed thumbnail
-                    if job.image_path and os.path.exists(job.image_path):
-                        new_thumbnail = create_status_thumbnail(
-                            job.image_path,
-                            "failed",
-                            (255, 0, 0),  # Red color
-                            "FAILED"
-                        )
-                        if new_thumbnail:
-                            new_thumbnail.save(job.thumbnail)
+                    mark_job_failed(job)
+                    # if job.image_path and os.path.exists(job.image_path):
+                        # new_thumbnail = create_status_thumbnail(
+                            # job.image_path,
+                            # "failed",
+                            # (255, 0, 0),  # Red color
+                            # "FAILED"
+                        # )
+                        # if new_thumbnail:
+                            # new_thumbnail.save(job.thumbnail)
                 else:
                     job.status = "completed"
-                    # Create completed thumbnail
-                    if job.image_path and os.path.exists(job.image_path):
-                        new_thumbnail = create_status_thumbnail(
-                            job.image_path,
-                            "completed",
-                            (0, 255, 0),  # Green color
-                            "DONE"
-                        )
-                        if new_thumbnail:
-                            new_thumbnail.save(job.thumbnail)
+                    mark_job_completed(job)
+                    # if job.image_path and os.path.exists(job.image_path):
+                        # new_thumbnail = create_status_thumbnail(
+                            # job.image_path,
+                            # "completed",
+                            # (0, 255, 0),  # Green color
+                            # "DONE"
+                        # )
+                        # if new_thumbnail:
+                            # new_thumbnail.save(job.thumbnail)
                 break
 
         # Save the updated queue
@@ -1704,19 +1688,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
             if flag == 'end':
                 # Find the current processing job
-                current_job = None
                 for job in job_queue:
                     if job.status == "processing":
-                        current_job = job
-                        break
-
-                if current_job:
-                    # Only mark as completed if it's not already marked as failed
-                    if current_job.status != "failed":
-                        mark_job_completed(current_job)
-                        clean_up_temp_mp4png(current_job.job_hex, outputs_folder, keep_temp_png, keep_temp_mp4, keep_temp_json)
+                        mark_job_completed(job)
+                        clean_up_temp_mp4png(job_hex, outputs_folder, keep_temp_png, keep_temp_mp4, keep_temp_json)
                         cleanup_orphaned_files()
-                        queue_table_update, queue_display_update = mark_job_completed(current_job)
+                        queue_table_update, queue_display_update = mark_job_completed(job)
                         save_queue()
                         update_queue_table()
                         update_queue_display()
@@ -2413,10 +2390,10 @@ css = make_progress_bar_css() + """
     min-width: 42px !important;
     max-width: 42px !important;
     text-align: center !important;
-    vertical-align: middle !important;
-    font-size: 1.5em !important;
+    # vertical-align: middle !important;
+    # font-size: 1.5em !important;
     padding: 0 !important;
-    overflow: visible !important;
+    # overflow: visible !important;
 }
 .gradio-dataframe td:nth-child(2):hover,
 .gradio-dataframe td:nth-child(3):hover,
