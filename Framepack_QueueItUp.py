@@ -979,7 +979,15 @@ def create_status_thumbnail(image_path, status, border_color, status_text):
         draw = ImageDraw.Draw(img_with_border)
         # Use smaller font size for RUNNING text
         font_size = 30 if status_text == "RUNNING" else 40
-        font = ImageFont.truetype("arial.ttf", font_size)  # You might need to adjust font path
+        try:
+            font = ImageFont.truetype("arial.ttf", font_size)
+        except (OSError, IOError):
+            try:
+                # DejaVuSans ships with Pillow and is usually available
+                font = ImageFont.truetype("DejaVuSans.ttf", font_size)
+            except (OSError, IOError):
+                # Final fallback to a simple built-in bitmap font
+                font = ImageFont.load_default()
         text = status_text
         text_bbox = draw.textbbox((0, 0), text, font=font)
         text_width = text_bbox[2] - text_bbox[0]
@@ -1418,39 +1426,14 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
                 if job_failed:
                     job.status = "failed"
                     mark_job_failed(job)
-                    # if job.image_path and os.path.exists(job.image_path):
-                        # new_thumbnail = create_status_thumbnail(
-                            # job.image_path,
-                            # "failed",
-                            # (255, 0, 0),  # Red color
-                            # "FAILED"
-                        # )
-                        # if new_thumbnail:
-                            # new_thumbnail.save(job.thumbnail)
                 else:
                     job.status = "completed"
                     mark_job_completed(job)
-                    # if job.image_path and os.path.exists(job.image_path):
-                        # new_thumbnail = create_status_thumbnail(
-                            # job.image_path,
-                            # "completed",
-                            # (0, 255, 0),  # Green color
-                            # "DONE"
-                        # )
-                        # if new_thumbnail:
-                            # new_thumbnail.save(job.thumbnail)
+
                 break
 
         # Save the updated queue
         save_queue()
-
-        # # Only mark as failed if we actually failed and didn't complete
-        # if job_failed:
-            # stream.output_queue.push(('progress', (None, '', make_progress_bar_html(1, f'Failed: {str(e)}'))))
-            # stream.output_queue.push(('failed', job_hex))
-        # else:
-            # stream.output_queue.push(('progress', (None, '', make_progress_bar_html(1, 'Completed'))))
-            # stream.output_queue.push(('completed', job_hex))
 
     stream.output_queue.push(('end', None))
     return
