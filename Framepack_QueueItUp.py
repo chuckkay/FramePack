@@ -426,7 +426,7 @@ def save_image_to_temp(image: np.ndarray, job_id: str) -> str:
         traceback.print_exc()
         return ""
 
-def add_to_queue(prompt, n_prompt, input_image, total_second_length, seed, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, status="pending", mp4_crf=16, keep_temp_png=False, keep_temp_mp4=False, keep_temp_json=False):
+def add_to_queue(prompt, n_prompt, input_image, total_second_length, seed, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json, status="pending"):
     save_queue()
     try:
         # Make sure queue is loaded
@@ -613,7 +613,7 @@ def update_queue_table():
                 with open(job.thumbnail, "rb") as img_file:
                     import base64
                     img_data = base64.b64encode(img_file.read()).decode()
-                img_md = f'<div style="text-align: center; font-size: 0.8em; color: #666; margin-bottom: 5px;">{job.status}</div><div style="text-align: center; font-size: 0.8em; color: #666;">{job.job_id}</div><div style="text-align: center; font-size: 0.8em; color: #666;">Length: {job.video_length:.1f}s</div><img src="data:image/png;base64,{img_data}" alt="Input" style="max-width:100px; max-height:100px; display: block; margin: auto; object-fit: contain; transform: scale(0.75); transform-origin: top left;" />'
+                img_md = f'<div style="text-align: center; font-size: 0.8em; color: #666; margin-bottom: 5px;">{job.status}</div><div style="text-align: center; font-size: 0.8em; color: #666;">{job.job_id}</div><div style="text-align: center; font-size: 0.8em; color: #666;">seed: {job.seed}</div><div style="text-align: center; font-size: 0.8em; color: #666;">Length: {job.video_length:.1f}s</div><img src="data:image/png;base64,{img_data}" alt="Input" style="max-width:100px; max-height:100px; display: block; margin: auto; object-fit: contain; transform: scale(0.75); transform-origin: top left;" />'
             except Exception as e:
                 print(f"Error converting image to base64: {str(e)}")
                 img_md = ""
@@ -624,7 +624,7 @@ def update_queue_table():
         prompt_cell = f'<span style="white-space: normal; word-wrap: break-word; display: block; width: 100%;">{job.prompt}</span>'
 
         # Add edit button for pending jobs
-        edit_button = "✎" if job.status == "pending" else ""
+        edit_button = "✎" if job.status in ["pending", "completed"] else ""
         top_button = "⏫️"
         up_button = "⬆️"
         down_button = "⬇️"
@@ -1527,12 +1527,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         process_prompt = next_job.prompt if hasattr(next_job, 'prompt') else prompt
         process_n_prompt = next_job.n_prompt if hasattr(next_job, 'n_prompt') else n_prompt
         process_seed = next_job.seed if hasattr(next_job, 'seed') else seed
-        # Generate random seed if seed is -1
+        # Generate random seed if seed is -1, but don't save it back to the queue
         if process_seed == -1:
             process_seed = random.randint(0, 2**32 - 1)
-            # Update the job's seed in the queue
-            next_job.seed = process_seed
-            save_queue()
         process_length = next_job.video_length if hasattr(next_job, 'video_length') else total_second_length
         process_steps = next_job.steps if hasattr(next_job, 'steps') else steps
         process_cfg = next_job.cfg if hasattr(next_job, 'cfg') else cfg
@@ -2077,7 +2074,22 @@ def handle_queue_action(evt: gr.SelectData):
     """Handle queue action button clicks"""
     if evt.index is None or evt.value not in ["⏫️", "⬆️", "⬇️", "⏬️", "❌", "📋", "✎"]:
         return (
-            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
+            Config.DEFAULT_PROMPT,
+            Config.DEFAULT_NEGATIVE_PROMPT,
+            Config.DEFAULT_VIDEO_LENGTH,
+            Config.DEFAULT_SEED,
+            Config.DEFAULT_USE_TEACACHE,
+            Config.DEFAULT_GPU_MEMORY,
+            Config.DEFAULT_STEPS,
+            Config.DEFAULT_CFG,
+            Config.DEFAULT_GS,
+            Config.DEFAULT_RS,
+            Config.DEFAULT_MP4_CRF,
+            Config.DEFAULT_KEEP_TEMP_PNG,
+            Config.DEFAULT_KEEP_TEMP_MP4,
+            Config.DEFAULT_KEEP_TEMP_JSON,
+            "",  # job_id
+            gr.update(visible=False)  # edit group visibility
         )
     
     row_index, col_index = evt.index
@@ -2088,34 +2100,16 @@ def handle_queue_action(evt: gr.SelectData):
     
     if button_clicked == "⏫️":  # Double up arrow (Top)
         move_job_to_top(job_id)
-        return (
-            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
-        )
     elif button_clicked == "⬆️":  # Single up arrow (Up)
         move_job(job_id, 'up')
-        return (
-            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
-        )
     elif button_clicked == "⬇️":  # Single down arrow (Down)
         move_job(job_id, 'down')
-        return (
-            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
-        )
     elif button_clicked == "⏬️":  # Double down arrow (Bottom)
         move_job_to_bottom(job_id)
-        return (
-            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
-        )
     elif button_clicked == "❌":
         remove_job(job_id)
-        return (
-            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
-        )
     elif button_clicked == "📋":
         copy_job(job_id)
-        return (
-            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
-        )
     elif button_clicked == "✎":
         # Get the job
         job = next((j for j in job_queue if j.job_id == job_id), None)
@@ -2140,8 +2134,24 @@ def handle_queue_action(evt: gr.SelectData):
                 gr.update(visible=True)  # Show edit group
             )
     
+    # For all other actions, return default values
     return (
-        "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, False, "", gr.update(visible=False)
+        Config.DEFAULT_PROMPT,
+        Config.DEFAULT_NEGATIVE_PROMPT,
+        Config.DEFAULT_VIDEO_LENGTH,
+        Config.DEFAULT_SEED,
+        Config.DEFAULT_USE_TEACACHE,
+        Config.DEFAULT_GPU_MEMORY,
+        Config.DEFAULT_STEPS,
+        Config.DEFAULT_CFG,
+        Config.DEFAULT_GS,
+        Config.DEFAULT_RS,
+        Config.DEFAULT_MP4_CRF,
+        Config.DEFAULT_KEEP_TEMP_PNG,
+        Config.DEFAULT_KEEP_TEMP_MP4,
+        Config.DEFAULT_KEEP_TEMP_JSON,
+        "",  # job_id
+        gr.update(visible=False)  # edit group visibility
     )
 
 def copy_job(job_id):
@@ -2320,7 +2330,9 @@ css = make_progress_bar_css() + """
     text-align: center !important;
     padding: 8px !important;
 }
-
+.output-html:last-of-type, .gradio-html:last-of-type, .gradio-html-block:last-of-type {
+    display: none !important;
+}
 /* Column‐width overrides */
 .gradio-dataframe th:nth-child(7) { width:  80px !important; min-width:  80px !important; }
 .gradio-dataframe th:nth-child(8) { width:  60px !important; min-width:  60px !important; }
@@ -2336,12 +2348,13 @@ def edit_job(job_id, new_prompt, new_n_prompt, new_video_length, new_seed, new_u
         for job in job_queue:
             if job.job_id == job_id:
                 # Only allow editing if job is pending
-                if job.status != "pending":
+                if job.status not in ("pending", "completed"):
                     return update_queue_table(), update_queue_display(), gr.update(visible=False)
-                
+
                 # Update job parameters
                 job.prompt = new_prompt
                 job.n_prompt = new_n_prompt
+                job.status = "pending"
                 job.video_length = new_video_length
                 job.seed = new_seed
                 job.use_teacache = new_use_teacache
@@ -2435,9 +2448,10 @@ with block:
                     )
                     
 
-        with gr.Tab("Queue Sort Order"):
+        with gr.Tab("Edit jobs in the Queue"):
             gr.Markdown("### Queuing Order")
             delete_all_button = gr.Button(value="Delete All Jobs", interactive=True)
+            gr.Markdown("Note: Jobs that are Processing are always listed at the top, Jobs that are completed are always at the bottom")
             queue_table = gr.DataFrame(
                 headers=None,
                 datatype=["markdown","str","str","str","str","str","str","str","markdown"],
