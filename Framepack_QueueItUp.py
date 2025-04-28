@@ -439,16 +439,12 @@ def add_to_queue(prompt, n_prompt, input_image, total_second_length, seed, use_t
         if not image_path:
             return None
             
-        # Generate random seed if seed is -1
-        if seed == -1:
-            seed = random.randint(0, 2**32 - 1)
-            
         job = QueuedJob(
             prompt=prompt,
             image_path=image_path,
             video_length=total_second_length,
             job_id=job_id,
-            seed=seed,
+            seed=seed,  # Keep original seed value, including -1
             use_teacache=use_teacache,
             gpu_memory_preservation=gpu_memory_preservation,
             steps=steps,
