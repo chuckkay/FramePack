@@ -890,7 +890,7 @@ def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool =
     except OSError as e:
         print(f"Failed to delete PNG file {png_path}: {e}")
 
-    # Delete the JSON file
+    # Delete the job_id.JSON job file
     json_path = os.path.join(outputs_folder, f'{job_id}.json')
     try:
         if os.path.exists(json_path) and not keep_temp_json:
@@ -1117,11 +1117,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             input_image = input_image[0]  # Get the file path from the tuple
         if isinstance(input_image, str):
             # If it's a path, open the image
-            input_image = np.array(Image.open(input_image))  # No RGB conversion
+            input_image = np.array(Image.open(input_image))
         elif isinstance(input_image, list):
             # If it's a list of tuples, get the first one
             if isinstance(input_image[0], tuple):
-                input_image = np.array(Image.open(input_image[0][0]))  # No RGB conversion
+                input_image = np.array(Image.open(input_image[0][0]))
             else:
                 # If it's already a numpy array
                 input_image = input_image[0]
@@ -1147,7 +1147,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         Image.fromarray(input_image_np).save(os.path.join(outputs_folder, f'{job_id}.png'), pnginfo=metadata)
 
-        # Save job parameters to JSON file
+        # Save job parameters to the job_id.JSON file
         job_params = {
             "prompt": prompt,
             "negative_prompt": n_prompt,
@@ -1256,7 +1256,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 percent_done = (current_time / total_second_length) * 100
                 desc = f'Current Job is running, Total generated frames: {int(max(0, total_generated_latent_frames * 4 - 3))}, Video length: {current_time:.2f} seconds of {total_second_length} at (FPS-30). The video is being extended now and is {percent_done:.1f}% done'
                 stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
-                return 
+                return
 
             try:
                 generated_latents = sample_hunyuan(
@@ -1389,7 +1389,6 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
 
 def process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
-    print(f"process called with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
     global stream
     
     # Initialize variables
@@ -1541,7 +1540,6 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         process_keep_temp_mp4 = next_job.keep_temp_mp4 if hasattr(next_job, 'keep_temp_mp4') else keep_temp_mp4
         process_keep_temp_json = next_job.keep_temp_json if hasattr(next_job, 'keep_temp_json') else keep_temp_json
         process_mp4_crf = next_job.mp4_crf if hasattr(next_job, 'mp4_crf') else mp4_crf
-        print(f"Processing pending job with keep_temp_png={process_keep_temp_png}, keep_temp_mp4={process_keep_temp_mp4}, keep_temp_json={process_keep_temp_json}")
     else:
         # No input image and no pending jobs
         print("No input image and no pending jobs to process")
@@ -2407,7 +2405,7 @@ with block:
 
                     with gr.Group():
                         use_teacache = gr.Checkbox(label='Use TeaCache', value=True, info='Faster speed, but often makes hands and fingers slightly worse.')
-                        seed = gr.Number(label="Seed", value=-1, precision=0)
+                        seed = gr.Number(label="Seed use -1 to create random seed for job", value=-1, precision=0)
                         total_second_length = gr.Slider(label="Total Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
                         latent_window_size = gr.Slider(label="Latent Window Size", minimum=1, maximum=33, value=9, step=1, visible=False)  # Should not change
                         steps = gr.Slider(label="Steps", minimum=1, maximum=100, value=25, step=1, info='Changing this value is not recommended.')
