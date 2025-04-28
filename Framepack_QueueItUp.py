@@ -34,10 +34,8 @@ from diffusers_helper.clip_vision import hf_clip_vision_encode
 from diffusers_helper.bucket_tools import find_nearest_bucket
 import shutil
 
-
 # Path to settings file
 SETTINGS_FILE = os.path.join(os.getcwd(), 'settings.ini')
-
 
 # Path to the quick prompts JSON file
 PROMPT_FILE = os.path.join(os.getcwd(), 'quick_prompts.json')
@@ -49,129 +47,52 @@ QUEUE_FILE = os.path.join(os.getcwd(), 'job_queue.json')
 temp_queue_images = os.path.join(os.getcwd(), 'temp_queue_images')
 os.makedirs(temp_queue_images, exist_ok=True)
 
-#todo make add these items to the settings ini and save tab
-outputs_folder = './outputs/' #this is the fall back directory on restore defaults
-job_history_folder = './job_history/'
-debug_mode = False
-
-
-
-
-
-os.makedirs(outputs_folder, exist_ok=True)
-os.makedirs(job_history_folder, exist_ok=True)
-
-
-
-
-# Initialize job queue as a list
-job_queue = []
-
 # ANSI color codes
 YELLOW = '\033[93m'
 RED = '\033[31m'
 RESET = '\033[0m'
 
 def debug_print(message):
-    if debug_mode:
-        """Print debug messages in yellow color"""
+    """Print debug messages in yellow color"""
+    if Config.DEBUG_MODE:
         print(f"{YELLOW}[DEBUG] {message}{RESET}")
     
 def alert_print(message):
     """ALERT debug messages in red color"""
     print(f"{RED}[DEBUG] {message}{RESET}")
-    
-
-
-def load_settings():
-    """Load settings from settings.ini file"""
-    config = configparser.ConfigParser()
-    
-    # Create default settings if file doesn't exist
-    if not os.path.exists(SETTINGS_FILE):
-        config['IPS Defaults'] = {k: repr(v) for k, v in Config.get_original_defaults().items()}
-        with open(SETTINGS_FILE, 'w') as f:
-            config.write(f)
-    else:
-        config.read(SETTINGS_FILE)
-        
-        # Create IPS Defaults section if it doesn't exist
-        if 'IPS Defaults' not in config:
-            config['IPS Defaults'] = {k: repr(v) for k, v in Config.get_original_defaults().items()}
-            with open(SETTINGS_FILE, 'w') as f:
-                config.write(f)
-    
-    return config
-# Load settings at startup
-settings_config = load_settings()
 
 def save_settings(config):
     """Save settings to settings.ini file"""
     with open(SETTINGS_FILE, 'w') as f:
         config.write(f)
 
-def save_settings_from_ui(use_teacache, seed, video_length, steps, cfg, gs, rs, gpu_memory, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
-    """Save settings from UI to settings.ini"""
-    global Config, settings_config
-    Config.DEFAULT_USE_TEACACHE = bool(use_teacache)
-    Config.DEFAULT_SEED = int(seed)
-    Config.DEFAULT_VIDEO_LENGTH = float(video_length)
-    Config.DEFAULT_STEPS = int(steps)
-    Config.DEFAULT_CFG = float(cfg)
-    Config.DEFAULT_GS = float(gs)
-    Config.DEFAULT_RS = float(rs)
-    Config.DEFAULT_GPU_MEMORY = float(gpu_memory)
-    Config.DEFAULT_MP4_CRF = int(mp4_crf)
-    Config.DEFAULT_KEEP_TEMP_PNG = bool(keep_temp_png)
-    Config.DEFAULT_KEEP_TEMP_MP4 = bool(keep_temp_mp4)
-    Config.DEFAULT_KEEP_TEMP_JSON = bool(keep_temp_json)
-    Config.to_settings(settings_config)
-    return "Settings saved successfully!" #why is this showing up on the bottom of every tab when I click save as defaults
-
-def restore_original_defaults():
-    """Restore original default values"""
-    global Config, settings_config
-    defaults = Config.get_original_defaults()
-    for key, value in defaults.items():
-        setattr(Config, key, value)
-    Config.to_settings(settings_config)
-    return (
-        Config.DEFAULT_USE_TEACACHE,
-        Config.DEFAULT_SEED,
-        Config.DEFAULT_VIDEO_LENGTH,
-        Config.DEFAULT_STEPS,
-        Config.DEFAULT_CFG,
-        Config.DEFAULT_GS,
-        Config.DEFAULT_RS,
-        Config.DEFAULT_GPU_MEMORY,
-        Config.DEFAULT_MP4_CRF,
-        Config.DEFAULT_KEEP_TEMP_PNG,
-        Config.DEFAULT_KEEP_TEMP_MP4,
-        Config.DEFAULT_KEEP_TEMP_JSON
-    )
-
 @dataclass
 class Config:
     """Centralized configuration for default values"""
     # Default prompt settings
-    DEFAULT_PROMPT: str = "The girl dances gracefully, with clear movements, full of charm."
-    DEFAULT_NEGATIVE_PROMPT: str = ""
-    DEFAULT_VIDEO_LENGTH: float = 5.0
-    DEFAULT_GS: float = 10.0
-    DEFAULT_STEPS: int = 25
-    DEFAULT_USE_TEACACHE: bool = True
-    DEFAULT_SEED: int = -1
-    DEFAULT_CFG: float = 1.0
-    DEFAULT_RS: float = 0.0
-    DEFAULT_GPU_MEMORY: float = 6.0
-    DEFAULT_MP4_CRF: int = 16
-    DEFAULT_KEEP_TEMP_PNG: bool = True
-    DEFAULT_KEEP_TEMP_MP4: bool = False
-    DEFAULT_KEEP_TEMP_JSON: bool = True
+    DEFAULT_PROMPT: str = None
+    DEFAULT_NEGATIVE_PROMPT: str = None
+    DEFAULT_VIDEO_LENGTH: float = None
+    DEFAULT_GS: float = None
+    DEFAULT_STEPS: int = None
+    DEFAULT_USE_TEACACHE: bool = None
+    DEFAULT_SEED: int = None
+    DEFAULT_CFG: float = None
+    DEFAULT_RS: float = None
+    DEFAULT_GPU_MEMORY: float = None
+    DEFAULT_MP4_CRF: int = None
+    DEFAULT_KEEP_TEMP_PNG: bool = None
+    DEFAULT_KEEP_TEMP_MP4: bool = None
+    DEFAULT_KEEP_TEMP_JSON: bool = None
+
+    # System defaults
+    OUTPUTS_FOLDER: str = None
+    JOB_HISTORY_FOLDER: str = None
+    DEBUG_MODE: bool = None
 
     @classmethod
     def get_original_defaults(cls):
-        """Returns a dictionary of original default values"""
+        """Returns a dictionary of original default values - this is the single source of truth for defaults"""
         return {
             'DEFAULT_PROMPT': "The girl dances gracefully, with clear movements, full of charm.",
             'DEFAULT_NEGATIVE_PROMPT': "",
@@ -186,54 +107,78 @@ class Config:
             'DEFAULT_MP4_CRF': 16,
             'DEFAULT_KEEP_TEMP_PNG': True,
             'DEFAULT_KEEP_TEMP_MP4': False,
-            'DEFAULT_KEEP_TEMP_JSON': True
+            'DEFAULT_KEEP_TEMP_JSON': True,
+            'OUTPUTS_FOLDER': './outputs/',
+            'JOB_HISTORY_FOLDER': './job_history/',
+            'DEBUG_MODE': False
         }
 
     @classmethod
     def from_settings(cls, config):
         """Create Config instance from settings.ini values"""
+        # Load IPS Defaults section
         section = config['IPS Defaults']
-        cls.DEFAULT_PROMPT = ast.literal_eval(section['DEFAULT_PROMPT'])
-        cls.DEFAULT_NEGATIVE_PROMPT = ast.literal_eval(section['DEFAULT_NEGATIVE_PROMPT'])
-        cls.DEFAULT_VIDEO_LENGTH = float(section['DEFAULT_VIDEO_LENGTH'])
-        cls.DEFAULT_GS = float(section['DEFAULT_GS'])
-        cls.DEFAULT_STEPS = int(section['DEFAULT_STEPS'])
-        cls.DEFAULT_USE_TEACACHE = ast.literal_eval(section['DEFAULT_USE_TEACACHE'])
-        cls.DEFAULT_SEED = int(section['DEFAULT_SEED'])
-        cls.DEFAULT_CFG = float(section['DEFAULT_CFG'])
-        cls.DEFAULT_RS = float(section['DEFAULT_RS'])
-        cls.DEFAULT_GPU_MEMORY = float(section['DEFAULT_GPU_MEMORY'])
-        cls.DEFAULT_MP4_CRF = int(section['DEFAULT_MP4_CRF'])
-        cls.DEFAULT_KEEP_TEMP_PNG = ast.literal_eval(section['DEFAULT_KEEP_TEMP_PNG'])
-        cls.DEFAULT_KEEP_TEMP_MP4 = ast.literal_eval(section['DEFAULT_KEEP_TEMP_MP4'])
-        # Handle missing DEFAULT_KEEP_TEMP_JSON key
-        try:
-            cls.DEFAULT_KEEP_TEMP_JSON = ast.literal_eval(section['DEFAULT_KEEP_TEMP_JSON'])
-        except KeyError:
-            cls.DEFAULT_KEEP_TEMP_JSON = False
-            # Add the missing key to the config
-            section['DEFAULT_KEEP_TEMP_JSON'] = str(cls.DEFAULT_KEEP_TEMP_JSON)
-            save_settings(config)
+        defaults = cls.get_original_defaults()
+        
+        # Load all values from settings, using defaults as fallback
+        for key, default_value in defaults.items():
+            if key.startswith('DEFAULT_'):
+                try:
+                    value = section.get(key, repr(default_value))
+                    # Only use ast.literal_eval for non-string values
+                    if isinstance(default_value, (bool, int, float)):
+                        setattr(cls, key, ast.literal_eval(value))
+                    else:
+                        setattr(cls, key, value.strip("'"))
+                except (KeyError, ValueError):
+                    setattr(cls, key, default_value)
+                    section[key] = repr(default_value)
+                    save_settings(config)
+
+        # Load System Defaults section
+        if 'System Defaults' not in config:
+            config['System Defaults'] = {}
+        section = config['System Defaults']
+        
+        # Load system values from settings, using defaults as fallback
+        for key, default_value in defaults.items():
+            if not key.startswith('DEFAULT_'):
+                try:
+                    value = section.get(key, str(default_value))
+                    # Only use ast.literal_eval for non-string values
+                    if isinstance(default_value, (bool, int, float)):
+                        setattr(cls, key, ast.literal_eval(value))
+                    else:
+                        setattr(cls, key, value.strip("'"))
+                except (KeyError, ValueError):
+                    setattr(cls, key, default_value)
+                    section[key] = str(default_value)
+                    save_settings(config)
+
         return cls
 
     @classmethod
     def to_settings(cls, config):
         """Save Config instance values to settings.ini"""
+        # Save IPS Defaults section
         section = config['IPS Defaults']
-        section['DEFAULT_PROMPT'] = repr(cls.DEFAULT_PROMPT)
-        section['DEFAULT_NEGATIVE_PROMPT'] = repr(cls.DEFAULT_NEGATIVE_PROMPT)
-        section['DEFAULT_VIDEO_LENGTH'] = str(cls.DEFAULT_VIDEO_LENGTH)
-        section['DEFAULT_GS'] = str(cls.DEFAULT_GS)
-        section['DEFAULT_STEPS'] = str(cls.DEFAULT_STEPS)
-        section['DEFAULT_USE_TEACACHE'] = str(cls.DEFAULT_USE_TEACACHE)
-        section['DEFAULT_SEED'] = str(cls.DEFAULT_SEED)
-        section['DEFAULT_CFG'] = str(cls.DEFAULT_CFG)
-        section['DEFAULT_RS'] = str(cls.DEFAULT_RS)
-        section['DEFAULT_GPU_MEMORY'] = str(cls.DEFAULT_GPU_MEMORY)
-        section['DEFAULT_MP4_CRF'] = str(cls.DEFAULT_MP4_CRF)
-        section['DEFAULT_KEEP_TEMP_PNG'] = str(cls.DEFAULT_KEEP_TEMP_PNG)
-        section['DEFAULT_KEEP_TEMP_MP4'] = str(cls.DEFAULT_KEEP_TEMP_MP4)
-        section['DEFAULT_KEEP_TEMP_JSON'] = str(cls.DEFAULT_KEEP_TEMP_JSON)
+        ips_defaults = [
+            'DEFAULT_PROMPT', 'DEFAULT_NEGATIVE_PROMPT', 'DEFAULT_VIDEO_LENGTH',
+            'DEFAULT_GS', 'DEFAULT_STEPS', 'DEFAULT_USE_TEACACHE', 'DEFAULT_SEED',
+            'DEFAULT_CFG', 'DEFAULT_RS', 'DEFAULT_GPU_MEMORY', 'DEFAULT_MP4_CRF',
+            'DEFAULT_KEEP_TEMP_PNG', 'DEFAULT_KEEP_TEMP_MP4', 'DEFAULT_KEEP_TEMP_JSON'
+        ]
+        for key in ips_defaults:
+            section[key] = repr(getattr(cls, key))
+
+        # Save System Defaults section
+        if 'System Defaults' not in config:
+            config['System Defaults'] = {}
+        section = config['System Defaults']
+        system_defaults = ['OUTPUTS_FOLDER', 'JOB_HISTORY_FOLDER', 'DEBUG_MODE']
+        for key in system_defaults:
+            section[key] = str(getattr(cls, key))
+
         save_settings(config)
 
     @classmethod
@@ -276,8 +221,192 @@ class Config:
             'keep_temp_json': cls.DEFAULT_KEEP_TEMP_JSON
         }
 
+def load_settings():
+    """Load settings from settings.ini file and ensure all sections and values exist"""
+    config = configparser.ConfigParser()
+    
+    # Get default values
+    default_values = Config.get_original_defaults()
+    
+    # Create default sections if file doesn't exist
+    if not os.path.exists(SETTINGS_FILE):
+        config['IPS Defaults'] = {k: repr(v) for k, v in default_values.items() if k.startswith('DEFAULT_')}
+        config['System Defaults'] = {k: str(v) for k, v in default_values.items() if not k.startswith('DEFAULT_')}
+        with open(SETTINGS_FILE, 'w') as f:
+            config.write(f)
+    else:
+        # Read existing config
+        config.read(SETTINGS_FILE)
+        
+        # Ensure IPS Defaults section exists with all values
+        if 'IPS Defaults' not in config:
+            config['IPS Defaults'] = {}
+        
+        # Check and add any missing values in IPS Defaults
+        for key, value in default_values.items():
+            if key.startswith('DEFAULT_') and key not in config['IPS Defaults']:
+                config['IPS Defaults'][key] = repr(value)
+        
+        # Ensure System Defaults section exists with all values
+        if 'System Defaults' not in config:
+            config['System Defaults'] = {}
+        
+        # Check and add any missing system values
+        for key, value in default_values.items():
+            if not key.startswith('DEFAULT_') and key not in config['System Defaults']:
+                config['System Defaults'][key] = str(value)
+        
+        # Save any changes made to the config
+        with open(SETTINGS_FILE, 'w') as f:
+            config.write(f)
+    
+    return config
+
+def save_settings_from_ui(use_teacache, seed, video_length, steps, cfg, gs, rs, gpu_memory, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
+    """Save settings from UI to settings.ini"""
+    global Config, settings_config
+    Config.DEFAULT_USE_TEACACHE = bool(use_teacache)
+    Config.DEFAULT_SEED = int(seed)
+    Config.DEFAULT_VIDEO_LENGTH = float(video_length)
+    Config.DEFAULT_STEPS = int(steps)
+    Config.DEFAULT_CFG = float(cfg)
+    Config.DEFAULT_GS = float(gs)
+    Config.DEFAULT_RS = float(rs)
+    Config.DEFAULT_GPU_MEMORY = float(gpu_memory)
+    Config.DEFAULT_MP4_CRF = int(mp4_crf)
+    Config.DEFAULT_KEEP_TEMP_PNG = bool(keep_temp_png)
+    Config.DEFAULT_KEEP_TEMP_MP4 = bool(keep_temp_mp4)
+    Config.DEFAULT_KEEP_TEMP_JSON = bool(keep_temp_json)
+    Config.to_settings(settings_config)
+    return "Settings saved successfully! this does not change any settings for jobs already in the queue, but you can change pending job settings in the edit jobs tab "
+
+def restore_original_defaults():
+    """Restore original default values"""
+    global Config, settings_config
+    defaults = Config.get_original_defaults()
+    for key, value in defaults.items():
+        setattr(Config, key, value)
+    Config.to_settings(settings_config)
+    return (
+        Config.DEFAULT_USE_TEACACHE,
+        Config.DEFAULT_SEED,
+        Config.DEFAULT_VIDEO_LENGTH,
+        Config.DEFAULT_STEPS,
+        Config.DEFAULT_CFG,
+        Config.DEFAULT_GS,
+        Config.DEFAULT_RS,
+        Config.DEFAULT_GPU_MEMORY,
+        Config.DEFAULT_MP4_CRF,
+        Config.DEFAULT_KEEP_TEMP_PNG,
+        Config.DEFAULT_KEEP_TEMP_MP4,
+        Config.DEFAULT_KEEP_TEMP_JSON
+    )
+
+def save_system_settings_from_ui(outputs_folder, job_history_folder, debug_mode):
+    """Save system settings from UI to settings.ini"""
+    global Config, settings_config
+    
+    # Create folders if they don't exist
+    os.makedirs(outputs_folder, exist_ok=True)
+    os.makedirs(job_history_folder, exist_ok=True)
+    
+    Config.OUTPUTS_FOLDER = outputs_folder
+    Config.JOB_HISTORY_FOLDER = job_history_folder
+    Config.DEBUG_MODE = bool(debug_mode)
+    Config.to_settings(settings_config)
+    
+    # Update local variables
+    setup_local_variables()
+    
+    return "System settings saved successfully! some settings may require restart to work"
+
+def restore_system_defaults():
+    """Restore system settings to original defaults"""
+    global Config, settings_config
+    
+    # Get default values
+    defaults = Config.get_original_defaults()
+    outputs_folder = defaults['OUTPUTS_FOLDER']
+    job_history_folder = defaults['JOB_HISTORY_FOLDER']
+    
+    # Create folders if they don't exist
+    os.makedirs(outputs_folder, exist_ok=True)
+    os.makedirs(job_history_folder, exist_ok=True)
+    
+    Config.OUTPUTS_FOLDER = outputs_folder
+    Config.JOB_HISTORY_FOLDER = job_history_folder
+    Config.DEBUG_MODE = False
+    Config.to_settings(settings_config)
+    
+    # Update local variables
+    setup_local_variables()
+    
+    return Config.OUTPUTS_FOLDER, Config.JOB_HISTORY_FOLDER, Config.DEBUG_MODE
+
+def save_queue():
+    """Save the current queue state to JSON file"""
+    try:
+        jobs = []
+        for job in job_queue:
+            job_dict = job.to_dict()
+            if job_dict is not None:
+                jobs.append(job_dict)
+        
+        file_path = os.path.abspath(QUEUE_FILE)
+        with open(file_path, 'w') as f:
+            json.dump(jobs, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving queue: {str(e)}")
+        traceback.print_exc()
+        return False
+
+def load_queue():
+    """Load queue state from JSON file"""
+    try:
+        if os.path.exists(QUEUE_FILE):
+            with open(QUEUE_FILE, 'r') as f:
+                jobs = json.load(f)
+            
+            # Clear existing queue and load jobs from file
+            job_queue.clear()
+            for job_data in jobs:
+                job = QueuedJob.from_dict(job_data)
+                if job is not None:
+                    job_queue.append(job)
+            
+            debug_print(f"Total jobs in the queue: {len(job_queue)}")
+            return job_queue
+        else:
+            debug_print("No queue file found")
+        return []
+    except Exception as e:
+        alert_print(f"Error loading queue: {str(e)}")
+        traceback.print_exc()
+        return []
+
+def setup_local_variables():
+    """Set up local variables from Config values"""
+    global job_history_folder, outputs_folder, debug_mode
+    job_history_folder = Config.JOB_HISTORY_FOLDER
+    outputs_folder = Config.OUTPUTS_FOLDER
+    debug_mode = Config.DEBUG_MODE
+
+# Initialize settings
+settings_config = load_settings()
 Config = Config.from_settings(settings_config)
-# Default prompts using Config class
+
+# Create necessary directories using values from Config
+os.makedirs(Config.OUTPUTS_FOLDER, exist_ok=True)
+os.makedirs(Config.JOB_HISTORY_FOLDER, exist_ok=True)
+
+# Initialize job queue as a list
+job_queue = []
+
+# Set up local variables
+setup_local_variables()
+
+# Initialize quick prompts
 DEFAULT_PROMPTS = [
     Config.get_default_prompt_dict(),
     {
@@ -297,6 +426,7 @@ DEFAULT_PROMPTS = [
         'keep_temp_json': Config.DEFAULT_KEEP_TEMP_JSON
     }
 ]
+
 # Load existing prompts or create the file with defaults
 if os.path.exists(PROMPT_FILE):
     with open(PROMPT_FILE, 'r') as f:
@@ -305,7 +435,6 @@ else:
     quick_prompts = DEFAULT_PROMPTS.copy()
     with open(PROMPT_FILE, 'w') as f:
         json.dump(quick_prompts, f, indent=2)
-
 
 @dataclass
 class QueuedJob:
@@ -380,51 +509,6 @@ class QueuedJob:
         except Exception as e:
             alert_print(f"Error creating job from dict: {str(e)}")
             return None
-
-
-
-def save_queue():
-    """Save the current queue state to JSON file"""
-    try:
-        jobs = []
-        for job in job_queue:
-            job_dict = job.to_dict()
-            if job_dict is not None:
-                jobs.append(job_dict)
-        
-        
-        file_path = os.path.abspath(QUEUE_FILE)
-        with open(file_path, 'w') as f:
-            json.dump(jobs, f, indent=2)
-        return True
-    except Exception as e:
-        print(f"Error saving queue: {str(e)}")
-        traceback.print_exc()
-        return False
-
-def load_queue():
-    """Load queue state from JSON file"""
-    try:
-        if os.path.exists(QUEUE_FILE):
-            with open(QUEUE_FILE, 'r') as f:
-                jobs = json.load(f)
-            
-            # Clear existing queue and load jobs from file
-            job_queue.clear()
-            for job_data in jobs:
-                job = QueuedJob.from_dict(job_data)
-                if job is not None:
-                    job_queue.append(job)
-            
-            debug_print(f"Total jobs in the queue: {len(job_queue)}")
-            return job_queue
-        else:
-            debug_print("No queue file found")
-        return []
-    except Exception as e:
-        alert_print(f"Error loading queue: {str(e)}")
-        traceback.print_exc()
-        return []
 
 def save_image_to_temp(image: np.ndarray, job_hex: str) -> str:
     """Save image to temp directory and return the path"""
@@ -2582,25 +2666,37 @@ with block:
 
 
         with gr.Tab("Settings"):
-            gr.Markdown("### Current Defaults")
-            with gr.Row():
-                with gr.Column():
-                    settings_use_teacache = gr.Checkbox(label='Use TeaCache', value=Config.DEFAULT_USE_TEACACHE)
-                    settings_seed = gr.Number(label="Seed", value=Config.DEFAULT_SEED, precision=0)
-                    settings_video_length = gr.Slider(label="Total Video Length (Seconds)", minimum=1, maximum=120, value=Config.DEFAULT_VIDEO_LENGTH, step=0.1)
-                    settings_steps = gr.Slider(label="Steps", minimum=1, maximum=100, value=Config.DEFAULT_STEPS, step=1)
-                    settings_cfg = gr.Slider(label="CFG Scale", minimum=1.0, maximum=32.0, value=Config.DEFAULT_CFG, step=0.01)
-                    settings_gs = gr.Slider(label="Distilled CFG Scale", minimum=1.0, maximum=32.0, value=Config.DEFAULT_GS, step=0.01)
-                    settings_rs = gr.Slider(label="CFG Re-Scale", minimum=0.0, maximum=1.0, value=Config.DEFAULT_RS, step=0.01)
-                    settings_gpu_memory = gr.Slider(label="GPU Memory Preservation (GB)", minimum=6, maximum=128, value=Config.DEFAULT_GPU_MEMORY, step=0.1)
-                    settings_mp4_crf = gr.Slider(label="MP4 Compression", minimum=0, maximum=100, value=Config.DEFAULT_MP4_CRF, step=1)
-                    settings_keep_temp_png = gr.Checkbox(label="Keep temp PNG", value=Config.DEFAULT_KEEP_TEMP_PNG)
-                    settings_keep_temp_mp4 = gr.Checkbox(label="Keep temp MP4", value=Config.DEFAULT_KEEP_TEMP_MP4)
-                    settings_keep_temp_json = gr.Checkbox(label="Keep temp JSON", value=Config.DEFAULT_KEEP_TEMP_JSON)
-                    
+            with gr.Tabs():
+                with gr.Tab("Job Defaults"):
                     with gr.Row():
-                        save_defaults_button = gr.Button("Save as Defaults")
-                        restore_defaults_button = gr.Button("Restore Original Defaults")
+                        with gr.Column():
+                            settings_use_teacache = gr.Checkbox(label='Use TeaCache', value=Config.DEFAULT_USE_TEACACHE)
+                            settings_seed = gr.Number(label="Seed", value=Config.DEFAULT_SEED, precision=0)
+                            settings_video_length = gr.Slider(label="Total Video Length (Seconds)", minimum=1, maximum=120, value=Config.DEFAULT_VIDEO_LENGTH, step=0.1)
+                            settings_steps = gr.Slider(label="Steps", minimum=1, maximum=100, value=Config.DEFAULT_STEPS, step=1)
+                            settings_cfg = gr.Slider(label="CFG Scale", minimum=1.0, maximum=32.0, value=Config.DEFAULT_CFG, step=0.01)
+                            settings_gs = gr.Slider(label="Distilled CFG Scale", minimum=1.0, maximum=32.0, value=Config.DEFAULT_GS, step=0.01)
+                            settings_rs = gr.Slider(label="CFG Re-Scale", minimum=0.0, maximum=1.0, value=Config.DEFAULT_RS, step=0.01)
+                            settings_gpu_memory = gr.Slider(label="GPU Memory Preservation (GB)", minimum=6, maximum=128, value=Config.DEFAULT_GPU_MEMORY, step=0.1)
+                            settings_mp4_crf = gr.Slider(label="MP4 Compression", minimum=0, maximum=100, value=Config.DEFAULT_MP4_CRF, step=1)
+                            settings_keep_temp_png = gr.Checkbox(label="Keep temp PNG", value=Config.DEFAULT_KEEP_TEMP_PNG)
+                            settings_keep_temp_mp4 = gr.Checkbox(label="Keep temp MP4", value=Config.DEFAULT_KEEP_TEMP_MP4)
+                            settings_keep_temp_json = gr.Checkbox(label="Keep temp JSON", value=Config.DEFAULT_KEEP_TEMP_JSON)
+                            
+                            with gr.Row():
+                                save_defaults_button = gr.Button("Save job settings as Defaults")
+                                restore_defaults_button = gr.Button("Restore Original job settings")
+
+                with gr.Tab("System Defaults"):
+                    with gr.Row():
+                        with gr.Column():
+                            settings_outputs_folder = gr.Textbox(label="Outputs Folder", value=Config.OUTPUTS_FOLDER)
+                            settings_job_history_folder = gr.Textbox(label="Job History Folder", value=Config.JOB_HISTORY_FOLDER)
+                            settings_debug_mode = gr.Checkbox(label="Debug Mode", value=Config.DEBUG_MODE)
+                            
+                            with gr.Row():
+                                save_system_defaults_button = gr.Button("Save System Settings")
+                                restore_system_defaults_button = gr.Button("Restore System Defaults")
 
     # Connect settings buttons and all other UI event bindings at the top level (not in a nested with block)
     save_defaults_button.click(
@@ -2620,6 +2716,26 @@ with block:
             settings_use_teacache, settings_seed, settings_video_length, settings_steps,
             settings_cfg, settings_gs, settings_rs, settings_gpu_memory, settings_mp4_crf,
             settings_keep_temp_png, settings_keep_temp_mp4, settings_keep_temp_json
+        ]
+    )
+
+    save_system_defaults_button.click(
+        fn=save_system_settings_from_ui,
+        inputs=[
+            settings_outputs_folder,
+            settings_job_history_folder,
+            settings_debug_mode
+        ],
+        outputs=[gr.Markdown()]
+    )
+
+    restore_system_defaults_button.click(
+        fn=restore_system_defaults,
+        inputs=[],
+        outputs=[
+            settings_outputs_folder,
+            settings_job_history_folder,
+            settings_debug_mode
         ]
     )
 
