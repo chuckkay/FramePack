@@ -263,22 +263,47 @@ def load_settings():
     return config
 
 def save_settings_from_ui(use_teacache, seed, video_length, steps, cfg, gs, rs, gpu_memory, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
-    """Save settings from UI to settings.ini"""
-    global Config, settings_config
-    Config.DEFAULT_USE_TEACACHE = bool(use_teacache)
-    Config.DEFAULT_SEED = int(seed)
-    Config.DEFAULT_VIDEO_LENGTH = float(video_length)
-    Config.DEFAULT_STEPS = int(steps)
-    Config.DEFAULT_CFG = float(cfg)
-    Config.DEFAULT_GS = float(gs)
-    Config.DEFAULT_RS = float(rs)
-    Config.DEFAULT_GPU_MEMORY = float(gpu_memory)
-    Config.DEFAULT_MP4_CRF = int(mp4_crf)
-    Config.DEFAULT_KEEP_TEMP_PNG = bool(keep_temp_png)
-    Config.DEFAULT_KEEP_TEMP_MP4 = bool(keep_temp_mp4)
-    Config.DEFAULT_KEEP_TEMP_JSON = bool(keep_temp_json)
-    Config.to_settings(settings_config)
-    return "Settings saved successfully! this does not change any settings for jobs already in the queue, but you can change pending job settings in the edit jobs tab "
+    """Save settings from UI to settings.ini and update Config class values"""
+    try:
+        config = load_settings()
+        section = config['IPS Defaults']
+        
+        # Update settings.ini
+        section['DEFAULT_USE_TEACACHE'] = repr(use_teacache)
+        section['DEFAULT_SEED'] = repr(seed)
+        section['DEFAULT_VIDEO_LENGTH'] = repr(video_length)
+        section['DEFAULT_STEPS'] = repr(steps)
+        section['DEFAULT_CFG'] = repr(cfg)
+        section['DEFAULT_GS'] = repr(gs)
+        section['DEFAULT_RS'] = repr(rs)
+        section['DEFAULT_GPU_MEMORY'] = repr(gpu_memory)
+        section['DEFAULT_MP4_CRF'] = repr(mp4_crf)
+        section['DEFAULT_KEEP_TEMP_PNG'] = repr(keep_temp_png)
+        section['DEFAULT_KEEP_TEMP_MP4'] = repr(keep_temp_mp4)
+        section['DEFAULT_KEEP_TEMP_JSON'] = repr(keep_temp_json)
+        
+        # Save to file
+        save_settings(config)
+        
+        # Update Config class values in memory
+        Config.DEFAULT_USE_TEACACHE = use_teacache
+        Config.DEFAULT_SEED = seed
+        Config.DEFAULT_VIDEO_LENGTH = video_length
+        Config.DEFAULT_STEPS = steps
+        Config.DEFAULT_CFG = cfg
+        Config.DEFAULT_GS = gs
+        Config.DEFAULT_RS = rs
+        Config.DEFAULT_GPU_MEMORY = gpu_memory
+        Config.DEFAULT_MP4_CRF = mp4_crf
+        Config.DEFAULT_KEEP_TEMP_PNG = keep_temp_png
+        Config.DEFAULT_KEEP_TEMP_MP4 = keep_temp_mp4
+        Config.DEFAULT_KEEP_TEMP_JSON = keep_temp_json
+        
+        debug_print("Settings saved successfully")
+        return "Settings saved successfully! This does not change any settings for jobs already in the queue, but you can change pending job settings in the edit jobs tab."
+    except Exception as e:
+        alert_print(f"Error saving settings: {str(e)}")
+        return f"Error saving settings: {str(e)}"
 
 def restore_original_defaults():
     """Restore original default values"""
@@ -441,7 +466,7 @@ class QueuedJob:
     prompt: str
     image_path: str
     video_length: float
-    job_hex: str  # Changed to string for hex ID
+    job_hex_id: str  # Changed to string for hex ID
     seed: int
     use_teacache: bool
     gpu_memory_preservation: float
@@ -463,7 +488,7 @@ class QueuedJob:
                 'prompt': self.prompt,
                 'image_path': self.image_path,
                 'video_length': self.video_length,
-                'job_hex': self.job_hex,
+                'job_hex_id': self.job_hex_id,
                 'seed': self.seed,
                 'use_teacache': self.use_teacache,
                 'gpu_memory_preservation': self.gpu_memory_preservation,
@@ -490,7 +515,7 @@ class QueuedJob:
                 prompt=data['prompt'],
                 image_path=data['image_path'],
                 video_length=data['video_length'],
-                job_hex=data['job_hex'],
+                job_hex_id=data['job_hex_id'],
                 seed=data['seed'],
                 use_teacache=data['use_teacache'],
                 gpu_memory_preservation=data['gpu_memory_preservation'],
@@ -510,7 +535,7 @@ class QueuedJob:
             alert_print(f"Error creating job from dict: {str(e)}")
             return None
 
-def save_image_to_temp(image: np.ndarray, job_hex: str) -> str:
+def save_image_to_temp(image: np.ndarray, job_hex_id: str) -> str:
     """Save image to temp directory and return the path"""
     try:
         # Handle Gallery tuple format
@@ -530,7 +555,7 @@ def save_image_to_temp(image: np.ndarray, job_hex: str) -> str:
                 pil_image = pil_image.convert('RGB')
             
         # Create unique filename using hex ID
-        filename = f"queue_image_{job_hex}.png"
+        filename = f"queue_image_{job_hex_id}.png"
         filepath = os.path.join(temp_queue_images, filename)
         # Save image
         pil_image.save(filepath)
@@ -547,9 +572,9 @@ def add_to_queue(prompt, n_prompt, input_image, total_second_length, seed, use_t
         load_queue()
         
         # Generate a unique hex ID for the job
-        job_hex = uuid.uuid4().hex[:8]
+        job_hex_id = uuid.uuid4().hex[:8]
         # Save image to temp directory and get path
-        image_path = save_image_to_temp(input_image, job_hex)
+        image_path = save_image_to_temp(input_image, job_hex_id)
         if not image_path:
             return None
             
@@ -557,7 +582,7 @@ def add_to_queue(prompt, n_prompt, input_image, total_second_length, seed, use_t
             prompt=prompt,
             image_path=image_path,
             video_length=total_second_length,
-            job_hex=job_hex,
+            job_hex_id=job_hex_id,
             seed=seed,  # Keep original seed value, including -1
             use_teacache=use_teacache,
             gpu_memory_preservation=gpu_memory_preservation,
@@ -583,30 +608,14 @@ def add_to_queue(prompt, n_prompt, input_image, total_second_length, seed, use_t
         # Insert the new job at the found index
         job_queue.insert(insert_index, job)
         save_queue()  # Save immediately after adding
-        return job_hex
+        return job_hex_id
     except Exception as e:
         alert_print(f"Error adding job to queue: {str(e)}")
         traceback.print_exc()
         return None
 
-def get_next_job():
-    """Get the next job from the queue"""
-    try:
-        # Make sure queue is loaded
-        load_queue()
-        
-        if job_queue:
-            job = job_queue.pop(0)  # Remove and return first job
-            save_queue()  # Save after removing job
-            return job
-        save_queue()
-        return None
-    except Exception as e:
-        print(f"Error getting next job: {str(e)}")
-        traceback.print_exc()
-        return None
 
-def create_missing_image(job_hex: str) -> tuple[str, str]:
+def create_missing_image(job_hex_id: str) -> tuple[str, str]:
     """Create placeholder images for missing queue images and thumbnails"""
     try:
         # Create a white image with MISSING text
@@ -622,12 +631,12 @@ def create_missing_image(job_hex: str) -> tuple[str, str]:
         draw.text((x, y), text, font=font, fill='black')
         
         # Save full size image
-        queue_image_path = os.path.join(temp_queue_images, f"queue_image_{job_hex}.png")
+        queue_image_path = os.path.join(temp_queue_images, f"queue_image_{job_hex_id}.png")
         img.save(queue_image_path)
         
         # Create and save thumbnail
         thumb_img = img.resize((200, 200), Image.Resampling.LANCZOS)
-        thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex}.png")
+        thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex_id}.png")
         thumb_img.save(thumb_path)
         
         return queue_image_path, thumb_path
@@ -651,7 +660,7 @@ def update_queue_display():
                 
                 if queue_image_missing and thumbnail_missing:
                     # Create missing placeholder images
-                    new_queue_image, new_thumbnail = create_missing_image(job.job_hex)
+                    new_queue_image, new_thumbnail = create_missing_image(job.job_hex_id)
                     if new_queue_image and new_thumbnail:
                         job.image_path = new_queue_image
                         job.thumbnail = new_thumbnail
@@ -665,7 +674,7 @@ def update_queue_display():
                         new_height = 200
                         new_width = int((new_height / height) * width)
                         img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                        thumb_path = os.path.join(temp_queue_images, f"thumb_{job.job_hex}.png")
+                        thumb_path = os.path.join(temp_queue_images, f"thumb_{job.job_hex_id}.png")
                         img.save(thumb_path)
                         job.thumbnail = thumb_path
                         # save_queue()
@@ -696,7 +705,7 @@ def update_queue_table():
             
             if queue_image_missing and thumbnail_missing:
                 # Create missing placeholder images
-                new_queue_image, new_thumbnail = create_missing_image(job.job_hex)
+                new_queue_image, new_thumbnail = create_missing_image(job.job_hex_id)
                 if new_queue_image and new_thumbnail:
                     job.image_path = new_queue_image
                     job.thumbnail = new_thumbnail
@@ -709,7 +718,7 @@ def update_queue_table():
                     new_height = 200
                     new_width = int((new_height / height) * width)
                     img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                    thumb_path = os.path.join(temp_queue_images, f"thumb_{job.job_hex}.png")
+                    thumb_path = os.path.join(temp_queue_images, f"thumb_{job.job_hex_id}.png")
                     img.save(thumb_path)
                     job.thumbnail = thumb_path
                 except Exception as e:
@@ -723,7 +732,7 @@ def update_queue_table():
                 with open(job.thumbnail, "rb") as img_file:
                     import base64
                     img_data = base64.b64encode(img_file.read()).decode()
-                img_md = f'<div style="text-align: center; font-size: 0.8em; color: #666; margin-bottom: 5px;">{job.status}</div><div style="text-align: center; font-size: 0.8em; color: #666;">{job.job_hex}</div><div style="text-align: center; font-size: 0.8em; color: #666;">seed: {job.seed}</div><div style="text-align: center; font-size: 0.8em; color: #666;">Length: {job.video_length:.1f}s</div><img src="data:image/png;base64,{img_data}" alt="Input" style="max-width:100px; max-height:100px; display: block; margin: auto; object-fit: contain; transform: scale(0.75); transform-origin: top left;" />'
+                img_md = f'<div style="text-align: center; font-size: 0.8em; color: #666; margin-bottom: 5px;">{job.status}</div><div style="text-align: center; font-size: 0.8em; color: #666;">{job.job_hex_id}</div><div style="text-align: center; font-size: 0.8em; color: #666;">seed: {job.seed}</div><div style="text-align: center; font-size: 0.8em; color: #666;">Length: {job.video_length:.1f}s</div><img src="data:image/png;base64,{img_data}" alt="Input" style="max-width:100px; max-height:100px; display: block; margin: auto; object-fit: contain; transform: scale(0.75); transform-origin: top left;" />'
             except Exception as e:
                 alert_print(f"Error converting image to base64: {str(e)}")
                 img_md = ""
@@ -807,7 +816,7 @@ def reset_processing_jobs():
         processing_jobs = []
         for job in job_queue:
             if job.status == "processing":
-                debug_print(f"Found job {job.job_hex} with status {job.status}")
+                debug_print(f"Found job {job.job_hex_id} with status {job.status}")
                 mark_job_pending(job)
                 processing_jobs.append(job)
         
@@ -819,13 +828,13 @@ def reset_processing_jobs():
         # Add them back at the top in reverse order (so they maintain their relative order)
         for job in reversed(processing_jobs):
             job_queue.insert(0, job)
-            debug_print(f"marked previously aborted job as pending and Moved job {job.job_hex} to top of queue")
+            debug_print(f"marked previously aborted job as pending and Moved job {job.job_hex_id} to top of queue")
         
         # Find all failed jobs and move them to top
         failed_jobs = []
         for job in job_queue:
             if job.status == "failed":
-                debug_print(f"Found job {job.job_hex} with status {job.status}")
+                debug_print(f"Found job {job.job_hex_id} with status {job.status}")
                 mark_job_pending(job)
                 failed_jobs.append(job)
         
@@ -837,7 +846,7 @@ def reset_processing_jobs():
         # Add them back at the top in reverse order (so they maintain their relative order)
         for job in reversed(failed_jobs):
             job_queue.insert(0, job)
-            debug_print(f"marked previously failed job as pending and Moved job {job.job_hex} to top of queue")
+            debug_print(f"marked previously failed job as pending and Moved job {job.job_hex_id} to top of queue")
         
         # Update in-memory queue and save to JSON
         save_queue()
@@ -993,26 +1002,25 @@ stream = AsyncStream()
 
 
 
-def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool = False, keep_temp_mp4: bool = False, keep_temp_json: bool = False) -> None:
+def clean_up_temp_mp4png(job, job_id):
     """
     Deletes all '<job_id>_<n>.mp4' in outputs_folder except the one with the largest n.
     Also deletes the '<job_id>.png' file and '<job_id>.json' file.
-    If keep_temp_png is True, no PNG file will be deleted.
-    If keep_temp_mp4 is True, no MP4 files will be deleted.
-    If keep_temp_json is True, no JSON file will be deleted.
+    Uses the keep_temp settings from the job object to determine which files to keep.
     """
-    debug_print(f"clean_up_temp_mp4png called with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
-    if keep_temp_png:
+    
+    debug_print(f"clean_up_temp_mp4png called with keep_temp_png={job.keep_temp_png}, keep_temp_mp4={job.keep_temp_mp4}, keep_temp_json={job.keep_temp_json}")
+    if job.keep_temp_png:
         debug_print(f"Keeping temporary PNG file for job {job_id} as requested")
-    if keep_temp_mp4:
+    if job.keep_temp_mp4:
         debug_print(f"Keeping temporary MP4 files for job {job_id} as requested")
-    if keep_temp_json:
+    if job.keep_temp_json:
         debug_print(f"Keeping temporary JSON file for job {job_id} as requested")
 
     # Delete the PNG file
     png_path = os.path.join(job_history_folder, f'{job_id}.png')
     try:
-        if os.path.exists(png_path) and not keep_temp_png:
+        if os.path.exists(png_path) and not job.keep_temp_png:
             os.remove(png_path)
             debug_print(f"Deleted PNG file: {png_path}")
     except OSError as e:
@@ -1021,7 +1029,7 @@ def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool =
     # Delete the job_id.JSON job file
     json_path = os.path.join(job_history_folder, f'{job_id}.json')
     try:
-        if os.path.exists(json_path) and not keep_temp_json:
+        if os.path.exists(json_path) and not job.keep_temp_json:
             os.remove(json_path)
             debug_print(f"Deleted JSON file: {json_path}")
     except OSError as e:
@@ -1046,7 +1054,7 @@ def clean_up_temp_mp4png(job_id: str, outputs_folder: str, keep_temp_png: bool =
 
     # delete all but the highest
     for count, fname in candidates:
-        if count != highest_count and not (keep_temp_mp4 and fname.endswith('.mp4')):
+        if count != highest_count and not (job.keep_temp_mp4 and fname.endswith('.mp4')):
             path = os.path.join(outputs_folder, fname)
             try:
                 os.remove(path)
@@ -1118,7 +1126,7 @@ def mark_job_processing(job):
         if job.image_path and os.path.exists(job.image_path):
             # Create thumbnail path if it doesn't exist
             if not job.thumbnail:
-                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_hex}.png")
+                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_hex_id}.png")
             
             new_thumbnail = create_status_thumbnail(
                 job.image_path,
@@ -1155,7 +1163,7 @@ def mark_job_completed(job):
         if job.image_path and os.path.exists(job.image_path):
             # Create thumbnail path if it doesn't exist
             if not job.thumbnail:
-                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_hex}.png")
+                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_hex_id}.png")
             
             new_thumbnail = create_status_thumbnail(
                 job.image_path,
@@ -1192,7 +1200,7 @@ def mark_job_failed(job):
         if job.image_path and os.path.exists(job.image_path):
             # Create thumbnail path if it doesn't exist
             if not job.thumbnail:
-                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_hex}.png")
+                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_hex_id}.png")
             
             new_thumbnail = create_status_thumbnail(
                 job.image_path,
@@ -1229,7 +1237,7 @@ def mark_job_pending(job):
         if job.image_path and os.path.exists(job.image_path):
             # Create thumbnail path if it doesn't exist
             if not job.thumbnail:
-                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_hex}.png")
+                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_hex_id}.png")
             
             # Load and resize image for thumbnail
             img = Image.open(job.image_path)
@@ -1498,16 +1506,26 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
 
             print(f'Decoded. Current latent shape {real_history_latents.shape}; pixel shape {history_pixels.shape}')
 
+            # Find the job that's currently being processed
+            job = next((job for job in job_queue if job.status == "processing"), None)
+            if job is None:
+                alert_print(f"Could not find processing job for job_id {job_id}")
+                return
+
+            
+
             stream.output_queue.push(('file', output_filename))
 
             if is_last_section:
-                debug_print(f"Calling clean_up_temp_mp4png with keep_temp_png={keep_temp_png}, keep_temp_mp4={keep_temp_mp4}, keep_temp_json={keep_temp_json}")
-                clean_up_temp_mp4png(job_id, outputs_folder, keep_temp_png, keep_temp_mp4, keep_temp_json)
+                debug_print(f"Calling clean_up_temp_mp4png")
+                clean_up_temp_mp4png(job, job_id)
+                
                 break
 
     except Exception as e:
         alert_print(f"Error in worker function: {str(e)}")
         traceback.print_exc()
+        alert_print(f"marking job failed for some reason")
         job_failed = True  # Mark job as failed if we hit an unhandled exception
 
     finally:
@@ -1520,11 +1538,17 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
         # Find the job in the queue and update its status
         for job in job_queue:
             if job.status == "processing":
+                
                 if job_failed:
+                    debug_print("marking file failed in worker")
                     job.status = "failed"
+                    debug_print("clean_up_temp_mp4png for failed job in worker")
+                    clean_up_temp_mp4png(job, job_id)
                     mark_job_failed(job)
                 else:
                     job.status = "completed"
+                    debug_print("clean_up_temp_mp4png for failed job in worker")
+                    clean_up_temp_mp4png(job, job_id)
                     mark_job_completed(job)
 
                 break
@@ -1542,7 +1566,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     
     # Initialize variables
     output_filename = None
-    job_hex = None
+    job_hex_id = None
     process_image = None
     process_prompt = prompt
     process_n_prompt = n_prompt
@@ -1571,7 +1595,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
            
             # Add each image as a separate job with pending status
             for img in input_images:
-                job_hex = add_to_queue(
+                job_hex_id = add_to_queue(
                     prompt=prompt,
                     n_prompt=n_prompt,
                     input_image=img,
@@ -1589,9 +1613,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     keep_temp_mp4=keep_temp_mp4,
                     keep_temp_json=keep_temp_json
                 )
-                if job_hex is not None:
+                if job_hex_id is not None:
                     # Create thumbnail for the job
-                    job = next((job for job in job_queue if job.job_hex == job_hex), None)
+                    job = next((job for job in job_queue if job.job_hex_id == job_hex_id), None)
                     if job and job.image_path:
                         try:
                             # Load and resize image for thumbnail
@@ -1600,7 +1624,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                             new_height = 200
                             new_width = int((new_height / height) * width)
                             img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                            thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex}.png")
+                            thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex_id}.png")
                             img.save(thumb_path)
                             job.thumbnail = thumb_path
                             save_queue()
@@ -1612,7 +1636,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             input_image = np.array(Image.open(input_image[0]))
             
             # Add single image job
-            job_hex = add_to_queue(
+            job_hex_id = add_to_queue(
                 prompt=prompt,
                 n_prompt=n_prompt,
                 input_image=input_image,
@@ -1630,9 +1654,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 keep_temp_mp4=keep_temp_mp4,
                 keep_temp_json=keep_temp_json
             )
-            if job_hex is not None:
+            if job_hex_id is not None:
                 # Create thumbnail for the job
-                job = next((job for job in job_queue if job.job_hex == job_hex), None)
+                job = next((job for job in job_queue if job.job_hex_id == job_hex_id), None)
                 if job and job.image_path:
                     try:
                         # Load and resize image for thumbnail
@@ -1641,7 +1665,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         new_height = 200
                         new_width = int((new_height / height) * width)
                         img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                        thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex}.png")
+                        thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex_id}.png")
                         img.save(thumb_path)
                         job.thumbnail = thumb_path
                         save_queue()
@@ -1662,7 +1686,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         mark_job_processing(next_job)  # Use new function to mark as processing
         save_queue()
         queue_table_update, queue_display_update = mark_job_processing(next_job)  # Use new function to mark as processing
-        job_hex = next_job.job_hex
+        job_hex_id = next_job.job_hex_id
         
         try:
             process_image = np.array(Image.open(next_job.image_path))
@@ -1675,12 +1699,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         process_prompt = next_job.prompt if hasattr(next_job, 'prompt') else prompt
         process_n_prompt = next_job.n_prompt if hasattr(next_job, 'n_prompt') else n_prompt
         process_seed = next_job.seed if hasattr(next_job, 'seed') else seed
-        debug_print(f"Job {next_job.job_hex} initial seed value: {process_seed}")
+        debug_print(f"Job {next_job.job_hex_id} initial seed value: {process_seed}")
         
         # Generate random seed if seed is -1
         if process_seed == -1:
             process_seed = random.randint(0, 2**32 - 1)
-            debug_print(f"Generated new random seed for job {next_job.job_hex}: {process_seed}")
+            debug_print(f"Generated new random seed for job {next_job.job_hex_id}: {process_seed}")
             # # Update the job's seed in the queue this is wrong
             # next_job.seed = process_seed
             save_queue()
@@ -1770,8 +1794,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 # Find the current processing job
                 for job in job_queue:
                     if job.status == "processing":
+                        debug_print("do we get here")
+                        
                         mark_job_completed(job)
-                        clean_up_temp_mp4png(job_hex, outputs_folder, keep_temp_png, keep_temp_mp4, keep_temp_json)
                         cleanup_orphaned_files()
                         queue_table_update, queue_display_update = mark_job_completed(job)
                         save_queue()
@@ -1809,12 +1834,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         next_n_prompt = next_job.n_prompt if hasattr(next_job, 'n_prompt') else n_prompt
                         ######## fix this
                         process_seed = next_job.seed if hasattr(next_job, 'seed') else seed
-                        debug_print(f"Job {next_job.job_hex} initial seed value: {process_seed}")
+                        debug_print(f"Job {next_job.job_hex_id} initial seed value: {process_seed}")
  
                         # Generate random seed if seed is -1
                         if process_seed == -1:
                             process_seed = random.randint(0, 2**32 - 1)
-                            # debug_print(f"Generated new random seed for job {next_job.job_hex}: {process_seed}")
+                            debug_print(f"Generated new random seed for job {next_job.job_hex_id}: {process_seed}")
                             save_queue()
 
                         next_length = next_job.video_length if hasattr(next_job, 'video_length') else total_second_length
@@ -1828,7 +1853,6 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         next_keep_temp_mp4 = next_job.keep_temp_mp4 if hasattr(next_job, 'keep_temp_mp4') else keep_temp_mp4
                         next_keep_temp_json = next_job.keep_temp_json if hasattr(next_job, 'keep_temp_json') else keep_temp_json
                         next_mp4_crf = next_job.mp4_crf if hasattr(next_job, 'mp4_crf') else mp4_crf
-                        
                         # Process next job
                         async_run(worker, next_image, next_prompt, next_n_prompt, process_seed, 
                                  next_length, latent_window_size, next_steps, 
@@ -1963,7 +1987,7 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
            
             # Add each image as a separate job with pending status
             for img in input_images:
-                job_hex = add_to_queue(
+                job_hex_id = add_to_queue(
                     prompt=prompt,
                     n_prompt=n_prompt,
                     input_image=img,
@@ -1981,9 +2005,9 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
                     keep_temp_mp4=keep_temp_mp4,
                     keep_temp_json=keep_temp_json
                 )
-                if job_hex is not None:
+                if job_hex_id is not None:
                     # Create thumbnail for the job
-                    job = next((job for job in job_queue if job.job_hex == job_hex), None)
+                    job = next((job for job in job_queue if job.job_hex_id == job_hex_id), None)
                     if job and job.image_path:
                         try:
                             # Load and resize image for thumbnail
@@ -1992,7 +2016,7 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
                             new_height = 200
                             new_width = int((new_height / height) * width)
                             img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                            thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex}.png")
+                            thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex_id}.png")
                             img.save(thumb_path)
                             job.thumbnail = thumb_path
                             save_queue()
@@ -2004,7 +2028,7 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
             input_image = np.array(Image.open(input_image[0]))  # Convert to numpy array
             
             # Add single image job
-            job_hex = add_to_queue(
+            job_hex_id = add_to_queue(
                 prompt=prompt,
                 n_prompt=n_prompt,
                 input_image=input_image,
@@ -2022,9 +2046,9 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
                 keep_temp_mp4=keep_temp_mp4,
                 keep_temp_json=keep_temp_json
             )
-            if job_hex is not None:
+            if job_hex_id is not None:
                 # Create thumbnail for the job
-                job = next((job for job in job_queue if job.job_hex == job_hex), None)
+                job = next((job for job in job_queue if job.job_hex_id == job_hex_id), None)
                 if job and job.image_path:
                     try:
                         # Load and resize image for thumbnail
@@ -2033,7 +2057,7 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
                         new_height = 200
                         new_width = int((new_height / height) * width)
                         img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                        thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex}.png")
+                        thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex_id}.png")
                         img.save(thumb_path)
                         job.thumbnail = thumb_path
                         save_queue()
@@ -2041,7 +2065,7 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
                         alert_print(f"Error creating thumbnail: {str(e)}")
                         job.thumbnail = ""
         
-        if job_hex is not None:
+        if job_hex_id is not None:
             save_queue()  # Save after changing statuses
             return update_queue_table(), update_queue_display(), gr.update(interactive=True)  # queue_button (always enabled)
         else:
@@ -2052,12 +2076,12 @@ def add_to_queue_handler(input_image, prompt, n_prompt, total_second_length, see
         return gr.update(), gr.update(), gr.update(interactive=True)  # queue_button (always enabled)
 
 
-def delete_job(job_hex):
+def delete_job(job_hex_id):
     """Delete a job from the queue and its associated files"""
     try:
         # Find and remove job from queue
         for job in job_queue:
-            if job.job_hex == job_hex:
+            if job.job_hex_id == job_hex_id:
                 # Delete associated files
                 if os.path.exists(job.image_path):
                     os.remove(job.image_path)
@@ -2091,13 +2115,13 @@ def delete_all_jobs():
         traceback.print_exc()
         return update_queue_display()
 
-def move_job_to_top(job_hex):
+def move_job_to_top(job_hex_id):
     """Move a job to the top of the queue, maintaining processing job at top"""
     try:
         # Find the job's current index
         current_index = None
         for i, job in enumerate(job_queue):
-            if job.job_hex == job_hex:
+            if job.job_hex_id == job_hex_id:
                 current_index = i
                 break
         
@@ -2127,13 +2151,13 @@ def move_job_to_top(job_hex):
         traceback.print_exc()
         return update_queue_table(), update_queue_display()
 
-def move_job_to_bottom(job_hex):
+def move_job_to_bottom(job_hex_id):
     """Move a job to the bottom of the queue, maintaining completed jobs at bottom"""
     try:
         # Find the job's current index
         current_index = None
         for i, job in enumerate(job_queue):
-            if job.job_hex == job_hex:
+            if job.job_hex_id == job_hex_id:
                 current_index = i
                 break
         
@@ -2163,13 +2187,13 @@ def move_job_to_bottom(job_hex):
         traceback.print_exc()
         return update_queue_table(), update_queue_display()
 
-def move_job(job_hex, direction):
+def move_job(job_hex_id, direction):
     """Move a job up or down one position in the queue while maintaining sorting rules"""
     try:
         # Find the job's current index
         current_index = None
         for i, job in enumerate(job_queue):
-            if job.job_hex == job_hex:
+            if job.job_hex_id == job_hex_id:
                 current_index = i
                 break
         
@@ -2206,12 +2230,12 @@ def move_job(job_hex, direction):
         traceback.print_exc()
         return update_queue_table(), update_queue_display()
 
-def remove_job(job_hex):
+def remove_job(job_hex_id):
     """Delete a job from the queue and its associated files"""
     try:
         # Find and remove job from queue
         for job in job_queue:
-            if job.job_hex == job_hex:
+            if job.job_hex_id == job_hex_id:
                 # Delete associated files
                 if os.path.exists(job.image_path):
                     os.remove(job.image_path)
@@ -2244,7 +2268,7 @@ def handle_queue_action(evt: gr.SelectData):
             Config.DEFAULT_KEEP_TEMP_PNG,
             Config.DEFAULT_KEEP_TEMP_MP4,
             Config.DEFAULT_KEEP_TEMP_JSON,
-            "",  # job_hex
+            "",  # job_hex_id
             gr.update(visible=False)  # edit group visibility
         )
     
@@ -2252,23 +2276,23 @@ def handle_queue_action(evt: gr.SelectData):
     button_clicked = evt.value
     
     # Get the job ID from the first column
-    job_hex = job_queue[row_index].job_hex
+    job_hex_id = job_queue[row_index].job_hex_id
     
     if button_clicked == "⏫️":  # Double up arrow (Top)
-        move_job_to_top(job_hex)
+        move_job_to_top(job_hex_id)
     elif button_clicked == "⬆️":  # Single up arrow (Up)
-        move_job(job_hex, 'up')
+        move_job(job_hex_id, 'up')
     elif button_clicked == "⬇️":  # Single down arrow (Down)
-        move_job(job_hex, 'down')
+        move_job(job_hex_id, 'down')
     elif button_clicked == "⏬️":  # Double down arrow (Bottom)
-        move_job_to_bottom(job_hex)
+        move_job_to_bottom(job_hex_id)
     elif button_clicked == "❌":
-        remove_job(job_hex)
+        remove_job(job_hex_id)
     elif button_clicked == "📋":
-        copy_job(job_hex)
+        copy_job(job_hex_id)
     elif button_clicked == "✎":
         # Get the job
-        job = next((j for j in job_queue if j.job_hex == job_hex), None)
+        job = next((j for j in job_queue if j.job_hex_id == job_hex_id), None)
         if job and job.status == "pending":
             # Return the job parameters for editing and show edit group
             return (
@@ -2286,7 +2310,7 @@ def handle_queue_action(evt: gr.SelectData):
                 job.keep_temp_png,
                 job.keep_temp_mp4,
                 job.keep_temp_json,
-                job_hex,
+                job_hex_id,
                 gr.update(visible=True)  # Show edit group
             )
     
@@ -2306,24 +2330,24 @@ def handle_queue_action(evt: gr.SelectData):
         Config.DEFAULT_KEEP_TEMP_PNG,
         Config.DEFAULT_KEEP_TEMP_MP4,
         Config.DEFAULT_KEEP_TEMP_JSON,
-        "",  # job_hex
+        "",  # job_hex_id
         gr.update(visible=False)  # edit group visibility
     )
 
-def copy_job(job_hex):
+def copy_job(job_hex_id):
     """Create a copy of a job and insert it below the original"""
     try:
         # Find the job
-        original_job = next((j for j in job_queue if j.job_hex == job_hex), None)
+        original_job = next((j for j in job_queue if j.job_hex_id == job_hex_id), None)
         if not original_job:
             return update_queue_table(), update_queue_display()
         
         # Create a new job ID
-        new_job_hex = uuid.uuid4().hex[:8]
+        new_job_hex_id = uuid.uuid4().hex[:8]
         
         # Copy the image file
         if os.path.exists(original_job.image_path):
-            new_image_path = os.path.join(temp_queue_images, f"queue_image_{new_job_hex}.png")
+            new_image_path = os.path.join(temp_queue_images, f"queue_image_{new_job_hex_id}.png")
             shutil.copy2(original_job.image_path, new_image_path)
         else:
             new_image_path = ""
@@ -2333,7 +2357,7 @@ def copy_job(job_hex):
             prompt=original_job.prompt,
             image_path=new_image_path,
             video_length=original_job.video_length,
-            job_hex=new_job_hex,
+            job_hex_id=new_job_hex_id,
             seed=original_job.seed,
             use_teacache=original_job.use_teacache,
             gpu_memory_preservation=original_job.gpu_memory_preservation,
@@ -2364,7 +2388,7 @@ def copy_job(job_hex):
                 new_height = 200
                 new_width = int((new_height / height) * width)
                 img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                thumb_path = os.path.join(temp_queue_images, f"thumb_{new_job_hex}.png")
+                thumb_path = os.path.join(temp_queue_images, f"thumb_{new_job_hex_id}.png")
                 img.save(thumb_path)
                 new_job.thumbnail = thumb_path
             except Exception as e:
@@ -2497,12 +2521,12 @@ css = make_progress_bar_css() + """
 """
 
 
-def edit_job(job_hex, new_prompt, new_n_prompt, new_video_length, new_seed, new_use_teacache, new_gpu_memory_preservation, new_steps, new_cfg, new_gs, new_rs, new_mp4_crf, new_keep_temp_png, new_keep_temp_mp4, new_keep_temp_json):
+def edit_job(job_hex_id, new_prompt, new_n_prompt, new_video_length, new_seed, new_use_teacache, new_gpu_memory_preservation, new_steps, new_cfg, new_gs, new_rs, new_mp4_crf, new_keep_temp_png, new_keep_temp_mp4, new_keep_temp_json):
     """Edit a job's parameters"""
     try:
         # Find the job
         for job in job_queue:
-            if job.job_hex == job_hex:
+            if job.job_hex_id == job_hex_id:
                 # Only allow editing if job is pending
                 if job.status not in ("pending", "completed"):
                     return update_queue_table(), update_queue_display(), gr.update(visible=False)
@@ -2636,7 +2660,7 @@ with block:
             # Add edit dialog
             with gr.Row():
                 with gr.Column():
-                    edit_job_hex = gr.Textbox(label="Job ID", visible=False)
+                    edit_job_hex_id = gr.Textbox(label="Job ID", visible=False)
                     edit_group = gr.Group(visible=False)  # Hidden by default
                     with edit_group:
                         save_edit_button = gr.Button("Save Changes")
@@ -2670,6 +2694,7 @@ with block:
                 with gr.Tab("Job Defaults"):
                     with gr.Row():
                         with gr.Column():
+                            gr.Markdown("### this will set the new job defaults, REQUIRES RESTART, these changes will not change setting for jobs that are already in the queue")
                             settings_use_teacache = gr.Checkbox(label='Use TeaCache', value=Config.DEFAULT_USE_TEACACHE)
                             settings_seed = gr.Number(label="Seed", value=Config.DEFAULT_SEED, precision=0)
                             settings_video_length = gr.Slider(label="Total Video Length (Seconds)", minimum=1, maximum=120, value=Config.DEFAULT_VIDEO_LENGTH, step=0.1)
@@ -2687,11 +2712,12 @@ with block:
                                 save_defaults_button = gr.Button("Save job settings as Defaults")
                                 restore_defaults_button = gr.Button("Restore Original job settings")
 
-                with gr.Tab("System Defaults"):
+                with gr.Tab("Global System Defaults"):
                     with gr.Row():
                         with gr.Column():
-                            settings_outputs_folder = gr.Textbox(label="Outputs Folder", value=Config.OUTPUTS_FOLDER)
-                            settings_job_history_folder = gr.Textbox(label="Job History Folder", value=Config.JOB_HISTORY_FOLDER)
+                            gr.Markdown("### this will set the new system defaults, it REQUIRES RESTART to take")
+                            settings_outputs_folder = gr.Textbox(label="Outputs Folder this is where your videos will be saved", value=Config.OUTPUTS_FOLDER)
+                            settings_job_history_folder = gr.Textbox(label="Job History Folder this is where the job settings json file and job input image is stored", value=Config.JOB_HISTORY_FOLDER)
                             settings_debug_mode = gr.Checkbox(label="Debug Mode", value=Config.DEBUG_MODE)
                             
                             with gr.Row():
@@ -2823,7 +2849,7 @@ with block:
             edit_keep_temp_png,
             edit_keep_temp_mp4,
             edit_keep_temp_json,
-            edit_job_hex,
+            edit_job_hex_id,
             edit_group
         ]
     ).then(
@@ -2856,7 +2882,7 @@ with block:
     save_edit_button.click(
         fn=edit_job,
         inputs=[
-            edit_job_hex,
+            edit_job_hex_id,
             edit_prompt,
             edit_n_prompt,
             edit_video_length,
