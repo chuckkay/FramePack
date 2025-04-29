@@ -1578,101 +1578,11 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     
     # First check for pending jobs
     pending_jobs = [job for job in job_queue if job.status.lower() == "pending"]
-    
-    # If we have new images, add them to queue first
-    if input_image is not None:
-        # Convert Gallery tuples to numpy arrays if needed
-        if isinstance(input_image, list):
-            # Multiple images case
-            input_images = [np.array(Image.open(img[0])) for img in input_image]
-           
-            # Add each image as a separate job with pending status
-            for img in input_images:
-                job_hex_id = add_to_queue(
-                    prompt=prompt,
-                    n_prompt=n_prompt,
-                    input_image=img,
-                    total_second_length=total_second_length,
-                    seed=seed,
-                    use_teacache=use_teacache,
-                    gpu_memory_preservation=gpu_memory_preservation,
-                    steps=steps,
-                    cfg=cfg,
-                    gs=gs,
-                    rs=rs,
-                    status="pending",
-                    mp4_crf=mp4_crf,
-                    keep_temp_png=keep_temp_png,
-                    keep_temp_mp4=keep_temp_mp4,
-                    keep_temp_json=keep_temp_json
-                )
-                if job_hex_id is not None:
-                    # Create thumbnail for the job
-                    job = next((job for job in job_queue if job.job_hex_id == job_hex_id), None)
-                    if job and job.image_path:
-                        try:
-                            # Load and resize image for thumbnail
-                            img = Image.open(job.image_path)
-                            width, height = img.size
-                            new_height = 200
-                            new_width = int((new_height / height) * width)
-                            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                            thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex_id}.png")
-                            img.save(thumb_path)
-                            job.thumbnail = thumb_path
-                            save_queue()
-                        except Exception as e:
-                            alert_print(f"Error creating thumbnail: {str(e)}")
-                            job.thumbnail = ""
-        else:
-            # Single image case
-            input_image = np.array(Image.open(input_image[0]))
-            
-            # Add single image job
-            job_hex_id = add_to_queue(
-                prompt=prompt,
-                n_prompt=n_prompt,
-                input_image=input_image,
-                total_second_length=total_second_length,
-                seed=seed,
-                use_teacache=use_teacache,
-                gpu_memory_preservation=gpu_memory_preservation,
-                steps=steps,
-                cfg=cfg,
-                gs=gs,
-                rs=rs,
-                status="pending",
-                mp4_crf=mp4_crf,
-                keep_temp_png=keep_temp_png,
-                keep_temp_mp4=keep_temp_mp4,
-                keep_temp_json=keep_temp_json
-            )
-            if job_hex_id is not None:
-                # Create thumbnail for the job
-                job = next((job for job in job_queue if job.job_hex_id == job_hex_id), None)
-                if job and job.image_path:
-                    try:
-                        # Load and resize image for thumbnail
-                        img = Image.open(job.image_path)
-                        width, height = img.size
-                        new_height = 200
-                        new_width = int((new_height / height) * width)
-                        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                        thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex_id}.png")
-                        img.save(thumb_path)
-                        job.thumbnail = thumb_path
-                        save_queue()
-                    except Exception as e:
-                        alert_print(f"Error creating thumbnail: {str(e)}")
-                        job.thumbnail = ""
+
+    # Update queue display after adding new jobs
+    update_queue_table()
+    update_queue_display()
         
-        # Update queue display after adding new jobs
-        update_queue_table()
-        update_queue_display()
-        
-        # Check for pending jobs again after adding new ones
-        pending_jobs = [job for job in job_queue if job.status.lower() == "pending"]
-    
     if pending_jobs:
         # Process first pending job
         next_job = pending_jobs[0]
@@ -1714,12 +1624,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         process_keep_temp_json = next_job.keep_temp_json if hasattr(next_job, 'keep_temp_json') else keep_temp_json
         process_mp4_crf = next_job.mp4_crf if hasattr(next_job, 'mp4_crf') else mp4_crf
     else:
-        # No input image and no pending jobs
-        debug_print("No input image and no pending jobs to process")
+        # No pending jobs
+        debug_print("No pending jobs to process")
         yield (
             None,  # result_video
             None,  # preview_image
-            "No input image and no pending jobs to process",  # progress_desc
+            "No pending jobs to process",  # progress_desc
             '',    # progress_bar
             gr.update(interactive=True),  # start_button
             gr.update(interactive=False),  # end_button
@@ -2619,9 +2529,9 @@ with block:
 
                 with gr.Column():
                     with gr.Row():
-                        start_button = gr.Button(value="Start Generation", interactive=True)
-                        end_button = gr.Button(value="End Generation", interactive=False)
                         queue_button = gr.Button(value="Add to Queue", interactive=True)
+                        start_button = gr.Button(value="Start Queued Jobs", interactive=True)
+                        end_button = gr.Button(value="Abort Generation", interactive=False)
                     
                     preview_image = gr.Image(label="Next Latents", height=200, visible=False)
                     result_video = gr.Video(label="Finished Frames", autoplay=True, show_share_button=False, height=512, loop=True)
