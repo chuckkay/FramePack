@@ -1294,17 +1294,6 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
         # Processing input image
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Image processing ...'))))
 
-        # this section of code not needed i think
-        if isinstance(input_image, tuple):
-            input_image = input_image[0]
-        if isinstance(input_image, str):
-            input_image = np.array(Image.open(input_image))
-        elif isinstance(input_image, list):
-            if isinstance(input_image[0], tuple):
-                input_image = np.array(Image.open(input_image[0][0]))
-            else:
-                input_image = input_image[0]
-
         H, W, C = input_image.shape
         height, width = find_nearest_bucket(H, W, resolution=640)
         input_image_np = resize_and_center_crop(input_image, target_width=width, target_height=height)
@@ -1470,6 +1459,10 @@ def worker(input_image, prompt, n_prompt, process_seed, total_second_length, lat
                     clean_latent_4x_indices=clean_latent_4x_indices,
                     callback=callback,
                 )
+            except KeyboardInterrupt:
+                # Handle the KeyboardInterrupt from callback
+                debug_print("Processing interrupted by user")
+                return  # Return gracefully instead of re-raising
             except Exception as e:
                 alert_print(f"Error in sampling: {str(e)}")
                 traceback.print_exc()
