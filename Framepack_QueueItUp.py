@@ -621,41 +621,94 @@ def add_to_queue(prompt, n_prompt, input_image, video_length, seed, use_teacache
         return None
 
 
-def create_missing_image(job_name: str) -> tuple[str, str]:
-    """Create placeholder images for missing queue images and thumbnails"""
+def create_thumbnail(image_path: str, job_name: str, status: str = "pending", status_text: str = None) -> str:
+    """Create a thumbnail for a job with optional status overlay
+    
+    Args:
+        image_path: Path to the source image
+        job_name: Name of the job
+        status: Job status ("pending", "processing", "completed", "failed", "missing")
+        status_text: Optional text to overlay on thumbnail
+        
+    Returns:
+        Path to the created thumbnail
+    """
     try:
-        # Create a white image with MISSING text
-        img = Image.new('RGB', (512, 512), color='white')
-        draw = ImageDraw.Draw(img)
-        font = ImageFont.truetype("arial.ttf", 40)
-        text = "MISSING"
-        text_bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = text_bbox[2] - text_bbox[0]
-        text_height = text_bbox[3] - text_bbox[1]
-        x = (512 - text_width) // 2
-        y = (512 - text_height) // 2
-        draw.text((x, y), text, font=font, fill='black')
+        # Handle missing image case
+        if not os.path.exists(image_path):
+            img = Image.new('RGB', (512, 512), color='white')
+            draw = ImageDraw.Draw(img)
+            font = ImageFont.truetype("arial.ttf", 40)
+            text = "MISSING"
+            text_bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            x = (512 - text_width) // 2
+            y = (512 - text_height) // 2
+            draw.text((x, y), text, font=font, fill='black')
+        else:
+            img = Image.open(image_path)
+            
+        # Resize to thumbnail size
+        width, height = img.size
+        new_height = 200
+        new_width = int((new_height / height) * width)
+        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
         
-        # Save full size image
-        queue_image_path = os.path.join(temp_queue_images, f"queue_image_{job_name}.png")
-        img.save(queue_image_path)
-        
-        # Create and save thumbnail
-        thumb_img = img.resize((200, 200), Image.Resampling.LANCZOS)
+        # Add status overlay if needed
+        if status != "pending" and status_text:
+            # Add border
+            border_size = 5
+            border_color = {
+                "processing": (255, 0, 0),    # Red
+                "completed": (0, 255, 0),     # Green
+                "failed": (255, 255, 0),      # Yellow
+                "missing": (128, 128, 128)    # Gray
+            }.get(status, (128, 128, 128))
+            
+            img_with_border = Image.new('RGB', 
+                (img.width + border_size*2, img.height + border_size*2), 
+                border_color)
+            img_with_border.paste(img, (border_size, border_size))
+            
+            # Add status text
+            draw = ImageDraw.Draw(img_with_border)
+            font_size = 30 if status_text == "RUNNING" else 40
+            try:
+                font = ImageFont.truetype("arial.ttf", font_size)
+            except (OSError, IOError):
+                try:
+                    font = ImageFont.truetype("DejaVuSans.ttf", font_size)
+                except (OSError, IOError):
+                    font = ImageFont.load_default()
+                    
+            text = status_text
+            text_bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            x = (img_with_border.width - text_width) // 2
+            y = (img_with_border.height - text_height) // 2
+            
+            # Draw text with black outline
+            for offset in [(-1,-1), (-1,1), (1,-1), (1,1)]:
+                draw.text((x+offset[0], y+offset[1]), text, font=font, fill=(0,0,0))
+            draw.text((x, y), text, font=font, fill=(255,255,255))
+            
+            img = img_with_border
+            
+        # Save thumbnail
         thumb_path = os.path.join(temp_queue_images, f"thumb_{job_name}.png")
-        thumb_img.save(thumb_path)
+        img.save(thumb_path)
+        return thumb_path
         
-        return queue_image_path, thumb_path
     except Exception as e:
-        alert_print(f"Error creating missing image: {str(e)}")
+        alert_print(f"Error creating thumbnail: {str(e)}")
         traceback.print_exc()
-        return "", ""
+        return ""
 
 def update_queue_display():
     """Update the queue display with current jobs from JSON"""
     try:
-
-        
         queue_data = []
         for job in job_queue:
             # Only check for missing images if the job is not being deleted
@@ -666,27 +719,14 @@ def update_queue_display():
                 
                 if queue_image_missing and thumbnail_missing:
                     # Create missing placeholder images
-                    new_queue_image, new_thumbnail = create_missing_image(job.job_name)
+                    new_queue_image = create_thumbnail("", job.job_name, "missing", "MISSING")
+                    new_thumbnail = new_queue_image
                     if new_queue_image and new_thumbnail:
                         job.image_path = new_queue_image
                         job.thumbnail = new_thumbnail
                         job.status = "missing"
-                        # save_queue()
                 elif not job.thumbnail and job.image_path:
-                    try:
-                        # Load and resize image for thumbnail
-                        img = Image.open(job.image_path)
-                        width, height = img.size
-                        new_height = 200
-                        new_width = int((new_height / height) * width)
-                        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                        thumb_path = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
-                        img.save(thumb_path)
-                        job.thumbnail = thumb_path
-                        # save_queue()
-                    except Exception as e:
-                        alert_print(f"Error creating thumbnail: {str(e)}")
-                        job.thumbnail = ""
+                    job.thumbnail = create_thumbnail(job.image_path, job.job_name, "pending")
 
             # Add job data to display
             if job.thumbnail:
@@ -711,25 +751,14 @@ def update_queue_table():
             
             if queue_image_missing and thumbnail_missing:
                 # Create missing placeholder images
-                new_queue_image, new_thumbnail = create_missing_image(job.job_name)
+                new_queue_image = create_thumbnail("", job.job_name, "missing", "MISSING")
+                new_thumbnail = new_queue_image
                 if new_queue_image and new_thumbnail:
                     job.image_path = new_queue_image
                     job.thumbnail = new_thumbnail
                     job.status = "missing"
             elif not job.thumbnail and job.image_path:
-                try:
-                    # Load and resize image for thumbnail
-                    img = Image.open(job.image_path)
-                    width, height = img.size
-                    new_height = 200
-                    new_width = int((new_height / height) * width)
-                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                    thumb_path = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
-                    img.save(thumb_path)
-                    job.thumbnail = thumb_path
-                except Exception as e:
-                    alert_print(f"Error creating thumbnail: {str(e)}")
-                    job.thumbnail = ""
+                job.thumbnail = create_thumbnail(job.image_path, job.job_name, "pending")
 
         # Add job data to display
         if job.thumbnail:
@@ -1075,58 +1104,8 @@ def clean_up_temp_mp4png(job):
             except OSError as e:
                 alert_print(f"Failed to delete {fname}: {e}")
 
-def create_status_thumbnail(image_path, status, border_color, status_text):
-    """Create a thumbnail with status-specific border and text"""
-    try:
-        # Load and resize image for thumbnail
-        img = Image.open(image_path)
-        width, height = img.size
-        new_height = 200
-        new_width = int((new_height / height) * width)
-        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        
-        # Add border
-        border_size = 5
-        img_with_border = Image.new('RGB', 
-            (img.width + border_size*2, img.height + border_size*2), 
-            border_color)
-        img_with_border.paste(img, (border_size, border_size))
-        
-        # Add status text
-        draw = ImageDraw.Draw(img_with_border)
-        # Use smaller font size for RUNNING text
-        font_size = 30 if status_text == "RUNNING" else 40
-        try:
-            font = ImageFont.truetype("arial.ttf", font_size)
-        except (OSError, IOError):
-            try:
-                # DejaVuSans ships with Pillow and is usually available
-                font = ImageFont.truetype("DejaVuSans.ttf", font_size)
-            except (OSError, IOError):
-                # Final fallback to a simple built-in bitmap font
-                font = ImageFont.load_default()
-        text = status_text
-        text_bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = text_bbox[2] - text_bbox[0]
-        text_height = text_bbox[3] - text_bbox[1]
-        
-        # Position text in center
-        x = (img_with_border.width - text_width) // 2
-        y = (img_with_border.height - text_height) // 2
-        
-        # Draw text with black outline
-        for offset in [(-1,-1), (-1,1), (1,-1), (1,1)]:
-            draw.text((x+offset[0], y+offset[1]), text, font=font, fill=(0,0,0))
-        draw.text((x, y), text, font=font, fill=(255,255,255))
-        
-        return img_with_border
-    except Exception as e:
-        alert_print(f"Error creating status thumbnail: {str(e)}")
-        traceback.print_exc()
-        return None
-
 def mark_job_processing(job):
-    """Mark a job as processing and update its thumbnail with a red border and RUNNING text"""
+    """Mark a job as processing and update its thumbnail"""
     try:
         job.status = "processing"
         
@@ -1135,19 +1114,8 @@ def mark_job_processing(job):
             os.remove(job.thumbnail)
         
         # Create new thumbnail with processing status
-        if job.image_path and os.path.exists(job.image_path):
-            # Create thumbnail path if it doesn't exist
-            if not job.thumbnail:
-                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
-            
-            new_thumbnail = create_status_thumbnail(
-                job.image_path,
-                "processing",
-                (255, 0, 0),  # Red color
-                "RUNNING"
-            )
-            if new_thumbnail:
-                new_thumbnail.save(job.thumbnail)
+        if job.image_path:
+            job.thumbnail = create_thumbnail(job.image_path, job.job_name, "processing", "RUNNING")
         
         # Move job to top of queue
         if job in job_queue:
@@ -1158,12 +1126,12 @@ def mark_job_processing(job):
         return update_queue_table(), update_queue_display()
             
     except Exception as e:
-        alert_print(f"Error modifying thumbnail: {str(e)}")
+        alert_print(f"Error marking job as processing: {str(e)}")
         traceback.print_exc()
         return gr.update(), gr.update()
 
 def mark_job_completed(job):
-    """Mark a job as completed and update its thumbnail with a green border and DONE text"""
+    """Mark a job as completed and update its thumbnail"""
     try:
         job.status = "completed"
         
@@ -1172,35 +1140,24 @@ def mark_job_completed(job):
             os.remove(job.thumbnail)
         
         # Create new thumbnail with completed status
-        if job.image_path and os.path.exists(job.image_path):
-            # Create thumbnail path if it doesn't exist
-            if not job.thumbnail:
-                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
-            
-            new_thumbnail = create_status_thumbnail(
-                job.image_path,
-                "completed",
-                (0, 255, 0),  # Green color
-                "DONE"
-            )
-            if new_thumbnail:
-                new_thumbnail.save(job.thumbnail)
+        if job.image_path:
+            job.thumbnail = create_thumbnail(job.image_path, job.job_name, "completed", "DONE")
         
         # Move job to bottom of queue
         if job in job_queue:
             job_queue.remove(job)
-            job_queue.append(job)  # Add to end of queue
+            job_queue.append(job)
             save_queue()
             
         return update_queue_table(), update_queue_display()
             
     except Exception as e:
-        alert_print(f"Error modifying thumbnail: {str(e)}")
+        alert_print(f"Error marking job as completed: {str(e)}")
         traceback.print_exc()
         return gr.update(), gr.update()
 
 def mark_job_failed(job):
-    """Mark a job as failed and update its thumbnail with a green border and DONE text"""
+    """Mark a job as failed and update its thumbnail"""
     try:
         job.status = "failed"
         
@@ -1209,19 +1166,8 @@ def mark_job_failed(job):
             os.remove(job.thumbnail)
         
         # Create new thumbnail with failed status
-        if job.image_path and os.path.exists(job.image_path):
-            # Create thumbnail path if it doesn't exist
-            if not job.thumbnail:
-                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
-            
-            new_thumbnail = create_status_thumbnail(
-                job.image_path,
-                "failed",
-                (255, 255, 0),  # Yellow color
-                "FAILED"
-            )
-            if new_thumbnail:
-                new_thumbnail.save(job.thumbnail)
+        if job.image_path:
+            job.thumbnail = create_thumbnail(job.image_path, job.job_name, "failed", "FAILED")
         
         # Move job to top of queue
         if job in job_queue:
@@ -1232,12 +1178,12 @@ def mark_job_failed(job):
         return update_queue_table(), update_queue_display()
             
     except Exception as e:
-        alert_print(f"Error modifying thumbnail: {str(e)}")
+        alert_print(f"Error marking job as failed: {str(e)}")
         traceback.print_exc()
         return gr.update(), gr.update()
-        
+
 def mark_job_pending(job):
-    """Mark a job as pending and update its thumbnail to a clean version without border or text"""
+    """Mark a job as pending and update its thumbnail"""
     try:
         job.status = "pending"
         
@@ -1246,25 +1192,13 @@ def mark_job_pending(job):
             os.remove(job.thumbnail)
         
         # Create new clean thumbnail
-        if job.image_path and os.path.exists(job.image_path):
-            # Create thumbnail path if it doesn't exist
-            if not job.thumbnail:
-                job.thumbnail = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
-            
-            # Load and resize image for thumbnail
-            img = Image.open(job.image_path)
-            width, height = img.size
-            new_height = 200
-            new_width = int((new_height / height) * width)
-            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            
-            # Save clean thumbnail
-            img.save(job.thumbnail)
+        if job.image_path:
+            job.thumbnail = create_thumbnail(job.image_path, job.job_name, "pending")
             
         return update_queue_table(), update_queue_display()
             
     except Exception as e:
-        alert_print(f"Error modifying thumbnail: {str(e)}")
+        alert_print(f"Error marking job as pending: {str(e)}")
         traceback.print_exc()
         return gr.update(), gr.update()
 
@@ -1570,12 +1504,12 @@ def worker(input_image, prompt, n_prompt, process_seed, job_name, video_length, 
                     debug_print("marking file failed in worker")
                     job.status = "failed"
                     debug_print("clean_up_temp_mp4png for failed job in worker")
-                    clean_up_temp_mp4png(job, job_id)
+                    clean_up_temp_mp4png(job)
                     mark_job_failed(job)
                 else:
                     job.status = "completed"
                     debug_print("clean_up_temp_mp4png for failed job in worker")
-                    clean_up_temp_mp4png(job, job_id)
+                    clean_up_temp_mp4png(job)
                     mark_job_completed(job)
 
                 break
@@ -1615,100 +1549,7 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
     
     # First check for pending jobs
     pending_jobs = [job for job in job_queue if job.status.lower() == "pending"]
-    # ########
-    # # If we have new images, add them to queue first
-    # if input_image is not None:
-        # # Convert Gallery tuples to numpy arrays if needed
-        # if isinstance(input_image, list):
-            # # Multiple images case
-            # input_images = [np.array(Image.open(img[0])) for img in input_image]
-           
-            # # Add each image as a separate job with pending status
-            # for img in input_images:
-                # job_hex_id = add_to_queue(
-                    # prompt=prompt,
-                    # n_prompt=n_prompt,
-                    # input_image=img,
-                    # total_second_length=total_second_length,
-                    # seed=seed,
-                    # use_teacache=use_teacache,
-                    # gpu_memory_preservation=gpu_memory_preservation,
-                    # steps=steps,
-                    # cfg=cfg,
-                    # gs=gs,
-                    # rs=rs,
-                    # status="pending",
-                    # mp4_crf=mp4_crf,
-                    # keep_temp_png=keep_temp_png,
-                    # keep_temp_mp4=keep_temp_mp4,
-                    # keep_temp_json=keep_temp_json
-                # )
-                # if job_hex_id is not None:
-                    # # Create thumbnail for the job
-                    # job = next((job for job in job_queue if job.job_hex_id == job_hex_id), None)
-                    # if job and job.image_path:
-                        # try:
-                            # # Load and resize image for thumbnail
-                            # img = Image.open(job.image_path)
-                            # width, height = img.size
-                            # new_height = 200
-                            # new_width = int((new_height / height) * width)
-                            # img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                            # thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex_id}.png")
-                            # img.save(thumb_path)
-                            # job.thumbnail = thumb_path
-                            # save_queue()
-                        # except Exception as e:
-                            # alert_print(f"Error creating thumbnail: {str(e)}")
-                            # job.thumbnail = ""
-        # else:
-            # # Single image case
-            # input_image = np.array(Image.open(input_image[0]))
-            
-            # # Add single image job
-            # job_hex_id = add_to_queue(
-                # prompt=prompt,
-                # n_prompt=n_prompt,
-                # input_image=input_image,
-                # total_second_length=total_second_length,
-                # seed=seed,
-                # use_teacache=use_teacache,
-                # gpu_memory_preservation=gpu_memory_preservation,
-                # steps=steps,
-                # cfg=cfg,
-                # gs=gs,
-                # rs=rs,
-                # status="pending",
-                # mp4_crf=mp4_crf,
-                # keep_temp_png=keep_temp_png,
-                # keep_temp_mp4=keep_temp_mp4,
-                # keep_temp_json=keep_temp_json
-            # )
-            # if job_hex_id is not None:
-                # # Create thumbnail for the job
-                # job = next((job for job in job_queue if job.job_hex_id == job_hex_id), None)
-                # if job and job.image_path:
-                    # try:
-                        # # Load and resize image for thumbnail
-                        # img = Image.open(job.image_path)
-                        # width, height = img.size
-                        # new_height = 200
-                        # new_width = int((new_height / height) * width)
-                        # img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                        # thumb_path = os.path.join(temp_queue_images, f"thumb_{job_hex_id}.png")
-                        # img.save(thumb_path)
-                        # job.thumbnail = thumb_path
-                        # save_queue()
-                    # except Exception as e:
-                        # alert_print(f"Error creating thumbnail: {str(e)}")
-                        # job.thumbnail = ""
 
-        # # Update queue display
-        # update_queue_table()
-        # update_queue_display()
-        # # Check for pending jobs again after adding new ones
-        # pending_jobs = [job for job in job_queue if job.status.lower() == "pending"]
-# ########
     if pending_jobs:
         # Process first pending job
         next_job = pending_jobs[0]
@@ -2015,14 +1856,14 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
         # Convert Gallery tuples to numpy arrays if needed
         if isinstance(input_image, list):
             # Multiple images case
-            input_images = [np.array(Image.open(img[0])) for img in input_image]
-           
-            # Add each image as a separate job with pending status
-            for img in input_images:
+            for img_tuple in input_image:
+                input_image = np.array(Image.open(img_tuple[0]))  # Convert to numpy array
+                
+                # Add job for each image
                 job_name = add_to_queue(
                     prompt=prompt,
                     n_prompt=n_prompt,
-                    input_image=img,
+                    input_image=input_image,
                     video_length=video_length,
                     seed=seed,
                     job_name=job_name,
@@ -2042,20 +1883,8 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
                     # Create thumbnail for the job
                     job = next((job for job in job_queue if job.job_name == job_name), None)
                     if job and job.image_path:
-                        try:
-                            # Load and resize image for thumbnail
-                            img = Image.open(job.image_path)
-                            width, height = img.size
-                            new_height = 200
-                            new_width = int((new_height / height) * width)
-                            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                            thumb_path = os.path.join(temp_queue_images, f"thumb_{job_name}.png")
-                            img.save(thumb_path)
-                            job.thumbnail = thumb_path
-                            save_queue()
-                        except Exception as e:
-                            alert_print(f"Error creating thumbnail: {str(e)}")
-                            job.thumbnail = ""
+                        job.thumbnail = create_thumbnail(job.image_path, job_name, "pending")
+                        save_queue()
         else:
             # Single image case
             input_image = np.array(Image.open(input_image[0]))  # Convert to numpy array
@@ -2084,20 +1913,8 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
                 # Create thumbnail for the job
                 job = next((job for job in job_queue if job.job_name == job_name), None)
                 if job and job.image_path:
-                    try:
-                        # Load and resize image for thumbnail
-                        img = Image.open(job.image_path)
-                        width, height = img.size
-                        new_height = 200
-                        new_width = int((new_height / height) * width)
-                        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                        thumb_path = os.path.join(temp_queue_images, f"thumb_{job_name}.png")
-                        img.save(thumb_path)
-                        job.thumbnail = thumb_path
-                        save_queue()
-                    except Exception as e:
-                        alert_print(f"Error creating thumbnail: {str(e)}")
-                        job.thumbnail = ""
+                    job.thumbnail = create_thumbnail(job.image_path, job_name, "pending")
+                    save_queue()
         
         if job_name is not None:
             save_queue()  # Save after changing statuses
@@ -2375,9 +2192,10 @@ def copy_job(job_name):
         original_job = next((j for j in job_queue if j.job_name == job_name), None)
         if not original_job:
             return update_queue_table(), update_queue_display()
-        
-        # Create a new job ID
-        new_job_name = uuid.uuid4().hex[:8]
+            
+        # Create a new job ID by keeping the prefix and replacing the last 8 chars
+        prefix = original_job.job_name[:-8] if len(original_job.job_name) > 8 else ""
+        new_job_name = prefix + uuid.uuid4().hex[:8]
         
         # Copy the image file
         if os.path.exists(original_job.image_path):
@@ -2385,7 +2203,7 @@ def copy_job(job_name):
             shutil.copy2(original_job.image_path, new_image_path)
         else:
             new_image_path = ""
-        
+            
         # Create new job with copied parameters
         new_job = QueuedJob(
             prompt=original_job.prompt,
@@ -2416,23 +2234,13 @@ def copy_job(job_name):
         
         # Create thumbnail for the new job
         if new_image_path:
-            try:
-                img = Image.open(new_image_path)
-                width, height = img.size
-                new_height = 200
-                new_width = int((new_height / height) * width)
-                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                thumb_path = os.path.join(temp_queue_images, f"thumb_{new_job_name}.png")
-                img.save(thumb_path)
-                new_job.thumbnail = thumb_path
-            except Exception as e:
-                alert_print(f"Error creating thumbnail: {str(e)}")
-                new_job.thumbnail = ""
+            new_job.thumbnail = create_thumbnail(new_image_path, new_job_name, "pending")
         
         # Save the updated queue
         save_queue()
         
         return update_queue_table(), update_queue_display()
+        
     except Exception as e:
         alert_print(f"Error copying job: {str(e)}")
         traceback.print_exc()
