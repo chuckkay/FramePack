@@ -26,6 +26,9 @@
 - **Batch Upload**  
   Upload several images at once, set your prompt & parameters, then “Add to Queue”—one job per image.
 
+- **custom Job names**  
+  - optionall featue to create a name prefix for individual jobs or batch jobs 
+
 - **Clone & Edit Jobs**  
   - Clone a pending job via the 📝 icon to duplicate settings in a new queue entry.  
   - Edit a pending job inline using the ✏️ icon to tweak prompt and parameters.
@@ -44,8 +47,11 @@
   - 🔚 Send to Bottom  
   - ❌ Remove
 
-- **Persistent Defaults**  
+- **Save/restor job Defaults**  
   Store your preferred settings as defaults—or revert to the original defaults with one click.
+
+- **change system Defaults**  
+  change output folder and job history folder, turn on or off debugging mode
 
 - **Output-Folder Control**  
   Toggle whether intermediate MP4s, PNGs, and JSON metadata are kept alongside final outputs.  
