@@ -59,6 +59,9 @@
 
 - **Random Seeds**  
   Set seed to `-1` to auto-generate a random seed at runtime; saved in `job.json` and image metadata.
+  
+- **Text to Video option added**  
+  leave image input empty and add job, it will now create a video from text only.
 
 - **Live Progress Info**  
   See current job name and percentage complete in the status bar above the progress bar.
