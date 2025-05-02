@@ -1,24 +1,11 @@
 # 🚂 QueueItUp for FramePack
 
-> A lightweight job-queue extension for lllyasviel’s FramePack WebUI
-
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](#) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](#) [![Version](https://img.shields.io/badge/version-1.0.0-orange.svg)](#)
-
----
-
-## 📑 Table of Contents
-
-- [🚀 Features](#-features)  
-- [💾 Installation](#-installation)  
-- [⚙️ Usage](#️-usage)  
-- [🛠 Configuration](#-configuration)  
-- [📸 Screenshots](#-screenshots)  
-- [❤️ Contributing](#-contributing)  
-- [📄 License](#-license)  
+> A lightweight robust job-queue mod for lllyasviel’s FramePack WebUI
+> packed with great enhancements to Make framepack even better.
 
 ---
 
-## 🚀 Features
+## 🚀 New Features
 
 - **Sequential Queuing**  
   Process multiple jobs one after another with a single click.
@@ -26,7 +13,7 @@
 - **Batch Upload**  
   Upload several images at once, set your prompt & parameters, then “Add to Queue”—one job per image.
 
-- **custom Job names**  
+- **Custom Job Names**  
   - optionall featue to create a name prefix for individual jobs or batch jobs 
 
 - **Clone & Edit Jobs**  
@@ -47,15 +34,19 @@
   - 🔚 Send to Bottom  
   - ❌ Remove
 
-- **Save/restor job Defaults**  
+- **Save/restore new job Defaults**  
   Store your preferred settings as defaults—or revert to the original defaults with one click.
 
-- **change system Defaults**  
+- **Change System Defaults**  
   change output folder and job history folder, turn on or off debugging mode
 
 - **Output-Folder Control**  
   Toggle whether intermediate MP4s, PNGs, and JSON metadata are kept alongside final outputs.  
   *(Coming soon: choose a custom default output folder.)*
+
+- **Keep Completed Jobs**  
+  check box option to keep jobs that have finished so you can edit them later and rerun them
+  basically changes the job status from completed to pending when you click edit.
 
 - **Random Seeds**  
   Set seed to `-1` to auto-generate a random seed at runtime; saved in `job.json` and image metadata.
