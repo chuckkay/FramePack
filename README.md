@@ -83,7 +83,9 @@
 
 ![Screenshot 2025-04-27 170353](https://github.com/user-attachments/assets/344333ee-4a11-437f-bb68-f031d1eec8b7)
 
-![Screenshot 2025-04-27 171830](https://github.com/user-attachments/assets/7f25fdac-51e5-439d-8432-7e88b6a3f1a0)
+![Screenshot 2025-05-02 094003](https://github.com/user-attachments/assets/a49d57fc-c96a-4f31-8273-0e5ad09d22e1)
+
+
 
 # FramePack
 <p align="center">
