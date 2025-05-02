@@ -79,6 +79,12 @@
    Framepack_QueueItUp.bat
    Framepack_QueueItUp.py
 
+![Screenshot 2025-04-27 171659](https://github.com/user-attachments/assets/8e415ec0-4772-421f-b925-f9ff1d513c89)
+
+![Screenshot 2025-04-27 170353](https://github.com/user-attachments/assets/344333ee-4a11-437f-bb68-f031d1eec8b7)
+
+![Screenshot 2025-04-27 171830](https://github.com/user-attachments/assets/7f25fdac-51e5-439d-8432-7e88b6a3f1a0)
+
 # FramePack
 <p align="center">
   <img src="https://github.com/user-attachments/assets/2cc030b4-87e1-40a0-b5bf-1b7d6b62820b" width="300" alt="Compact Quick-List Panel">
