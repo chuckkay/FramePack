@@ -45,18 +45,6 @@ PROMPT_FILE = os.path.join(os.getcwd(), 'quick_prompts.json')
 # Queue file path
 QUEUE_FILE = os.path.join(os.getcwd(), 'job_queue.json')
 
-# Model cache directory
-MODEL_CACHE_DIR = os.path.join(os.getcwd(), 'model_cache')
-os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
-
-# Model version tracking file
-MODEL_VERSIONS_FILE = os.path.join(MODEL_CACHE_DIR, 'model_versions.json')
-
-# Set Hugging Face cache directory
-os.environ['HF_HOME'] = MODEL_CACHE_DIR
-os.environ['TRANSFORMERS_CACHE'] = os.path.join(MODEL_CACHE_DIR, 'transformers')
-os.environ['HF_DATASETS_CACHE'] = os.path.join(MODEL_CACHE_DIR, 'datasets')
-
 # Temp directory for queue images
 temp_queue_images = os.path.join(os.getcwd(), 'temp_queue_images')
 os.makedirs(temp_queue_images, exist_ok=True)
@@ -67,124 +55,23 @@ RED = '\033[31m'
 GREEN = '\033[92m'
 RESET = '\033[0m'
 
+# Global variables
+debug_mode = False
+keep_completed = True
+
 def debug_print(message):
     """Print debug messages in yellow color"""
-    if Config.DEBUG_MODE:
+    if debug_mode:
         print(f"{YELLOW}[DEBUG] {message}{RESET}")
     
 def alert_print(message):
-    """ALERT debug messages in red color"""
-    print(f"{RED}[DEBUG] {message}{RESET}")
+    """Print alert messages in red color"""
+    print(f"{RED}[ALERT] {message}{RESET}")
 
 def info_print(message):
     """Print info messages in green color"""
     print(f"{GREEN}[INFO] {message}{RESET}")
 
-def get_model_versions():
-    """Get current versions of models from Hugging Face"""
-    try:
-        from huggingface_hub import HfApi
-        api = HfApi()
-        
-        models = {
-            "HunyuanVideo": "hunyuanvideo-community/HunyuanVideo",
-            "FluxRedux": "lllyasviel/flux_redux_bfl",
-            "FramePack": "lllyasviel/FramePackI2V_HY"
-        }
-        
-        versions = {}
-        for name, repo_id in models.items():
-            try:
-                # Get the latest commit hash
-                refs = api.list_repo_refs(repo_id)  # Removed timeout parameter
-                if refs and refs.branches:
-                    # Get the main/master branch commit
-                    main_branch = next((b for b in refs.branches if b.name in ['main', 'master']), None)
-                    if main_branch:
-                        versions[name] = main_branch.target_commit
-            except Exception as e:
-                debug_print(f"Could not get version for {name}: {str(e)}")
-                versions[name] = None
-        
-        return versions
-    except Exception as e:
-        debug_print(f"Could not check model versions: {str(e)}")
-        return None
-
-def load_local_versions():
-    """Load locally stored model versions"""
-    try:
-        if os.path.exists(MODEL_VERSIONS_FILE):
-            with open(MODEL_VERSIONS_FILE, 'r') as f:
-                return json.load(f)
-        return {}
-    except Exception as e:
-        alert_print(f"Error loading local versions: {str(e)}")
-        return {}
-
-def save_local_versions(versions):
-    """Save model versions to local file"""
-    try:
-        with open(MODEL_VERSIONS_FILE, 'w') as f:
-            json.dump(versions, f, indent=2)
-    except Exception as e:
-        alert_print(f"Error saving local versions: {str(e)}")
-
-def check_model_files():
-    """Check if required model files are downloaded and up to date"""
-    model_paths = {
-        "HunyuanVideo": os.path.join(MODEL_CACHE_DIR, "models--hunyuanvideo-community--HunyuanVideo"),
-        "FluxRedux": os.path.join(MODEL_CACHE_DIR, "models--lllyasviel--flux_redux_bfl"),
-        "FramePack": os.path.join(MODEL_CACHE_DIR, "models--lllyasviel--FramePackI2V_HY")
-    }
-    
-    # First check if all required models exist locally
-    missing_models = []
-    for name, path in model_paths.items():
-        if not os.path.exists(path):
-            missing_models.append(name)
-    
-    # If we have all models locally, try to check for updates
-    if not missing_models:
-        # Get current versions from Hugging Face
-        current_versions = get_model_versions()
-        
-        # If we couldn't get versions (no internet/slow), use local versions
-        if not current_versions:
-            info_print(f"\nUsing local model versions (could not check for updates)")
-            return
-        
-        # Load local versions
-        local_versions = load_local_versions()
-        
-        # Check each model
-        outdated_models = []
-        for name in model_paths.keys():
-            if name in current_versions and name in local_versions:
-                if current_versions[name] != local_versions[name]:
-                    outdated_models.append(name)
-        
-        if outdated_models:
-            print(f"\nThe following models have updates available:")
-            for model in outdated_models:
-                print(f"- {model}")
-            print("\nThese models will be updated to their latest versions.")
-        else:
-            info_print(f"\nAll models are up to date in {MODEL_CACHE_DIR}")
-        
-        # Save current versions
-        save_local_versions(current_versions)
-    else:
-        # If we're missing models, we need to try to download them
-        print(f"\nThe following models will be downloaded to {MODEL_CACHE_DIR}:")
-        for model in missing_models:
-            print(f"- {model}")
-        print("\nThis is a one-time download. Future runs will use the local files.")
-        
-        # Try to get versions for the download
-        current_versions = get_model_versions()
-        if current_versions:
-            save_local_versions(current_versions)
 
 def save_settings(config):
     """Save settings to settings.ini file"""
@@ -214,6 +101,7 @@ class Config:
     OUTPUTS_FOLDER: str = None
     JOB_HISTORY_FOLDER: str = None
     DEBUG_MODE: bool = None
+    KEEP_COMPLETED: bool = None
 
     @classmethod
     def get_original_defaults(cls):
@@ -235,7 +123,8 @@ class Config:
             'DEFAULT_KEEP_TEMP_JSON': True,
             'OUTPUTS_FOLDER': './outputs/',
             'JOB_HISTORY_FOLDER': './job_history/',
-            'DEBUG_MODE': False
+            'DEBUG_MODE': False,
+            'KEEP_COMPLETED': True
         }
 
     @classmethod
@@ -452,23 +341,29 @@ def restore_original_defaults():
         Config.DEFAULT_KEEP_TEMP_JSON
     )
 
-def save_system_settings_from_ui(outputs_folder, job_history_folder, debug_mode):
+def save_system_settings_from_ui(outputs_folder, job_history_folder, debug_mode, keep_completed):
     """Save system settings from UI to settings.ini"""
-    global Config, settings_config
+    config = configparser.ConfigParser()
+    config.read('settings.ini')
     
-    # Create folders if they don't exist
-    os.makedirs(outputs_folder, exist_ok=True)
-    os.makedirs(job_history_folder, exist_ok=True)
+    if 'System' not in config:
+        config['System'] = {}
     
+    config['System']['outputs_folder'] = outputs_folder
+    config['System']['job_history_folder'] = job_history_folder
+    config['System']['debug_mode'] = str(debug_mode)
+    config['System']['keep_completed'] = str(keep_completed)
+    
+    with open('settings.ini', 'w') as f:
+        config.write(f)
+    
+    # Update Config class
     Config.OUTPUTS_FOLDER = outputs_folder
     Config.JOB_HISTORY_FOLDER = job_history_folder
-    Config.DEBUG_MODE = bool(debug_mode)
-    Config.to_settings(settings_config)
+    Config.DEBUG_MODE = debug_mode
+    Config.KEEP_COMPLETED = keep_completed
     
-    # Update local variables
-    setup_local_variables()
-    
-    return "System settings saved successfully! some settings may require restart to work"
+    return f"Settings saved successfully!\nOutputs Folder: {outputs_folder}\nJob History Folder: {job_history_folder}\nDebug Mode: {debug_mode}\nKeep Completed: {keep_completed}"
 
 def restore_system_defaults():
     """Restore system settings to original defaults"""
@@ -530,10 +425,11 @@ def load_queue():
 
 def setup_local_variables():
     """Set up local variables from Config values"""
-    global job_history_folder, outputs_folder, debug_mode
+    global job_history_folder, outputs_folder, debug_mode, keep_completed
     job_history_folder = Config.JOB_HISTORY_FOLDER
     outputs_folder = Config.OUTPUTS_FOLDER
     debug_mode = Config.DEBUG_MODE
+    keep_completed = Config.KEEP_COMPLETED
 
 # Initialize settings
 settings_config = load_settings()
@@ -543,8 +439,6 @@ Config = Config.from_settings(settings_config)
 os.makedirs(Config.OUTPUTS_FOLDER, exist_ok=True)
 os.makedirs(Config.JOB_HISTORY_FOLDER, exist_ok=True)
 
-# Check for model files before loading
-check_model_files()
 
 # Initialize job queue as a list
 job_queue = []
@@ -688,14 +582,9 @@ def save_image_to_temp(image: np.ndarray, job_name: str) -> str:
 def add_to_queue(prompt, n_prompt, input_image, video_length, seed, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json, job_name, status="pending"):
     """Add a new job to the queue"""
     try:
-        if not job_name:  # This will catch both None and empty string
-            # Generate a hex ID for the job name
-            hex_id = uuid.uuid4().hex[:8]  # Get first 8 characters of UUID hex
-            job_name = f"job_{hex_id}"
-        else:
-            # If job_name is provided, append hex ID
-            hex_id = uuid.uuid4().hex[:8]
-            job_name = f"{job_name}_{hex_id}"
+               
+        hex_id = uuid.uuid4().hex[:8]
+        job_name = f"{job_name}_{hex_id}"
         load_queue()
 
         # Handle text-to-video case
@@ -952,20 +841,18 @@ def cleanup_orphaned_files():
 
 def reset_processing_jobs():
     print ("Reset any processing to pending and move them to top of queue")
+    global job_queue
     try:
         # First load the queue from JSON
         load_queue()
         
-        ## change this code to only delete if keep_job_history is false (create variable keep_job_history default is true
-        # Count completed jobs before removal
-        completed_jobs_count = len([job for job in job_queue if job.status == "completed"])
-        
-        # Now remove completed jobs
-        job_queue[:] = [job for job in job_queue if job.status != "completed"]
-        
-        # Only print if jobs were actually removed
-        if completed_jobs_count > 0:
-            debug_print(f"Removed {completed_jobs_count} completed jobs from queue")
+        # Remove completed jobs if keep_completed is False
+        if not keep_completed:
+            completed_jobs_count = len([job for job in job_queue if job.status == "completed"])
+            job_queue = [job for job in job_queue if job.status != "completed"]
+            # Only print if jobs were actually removed
+            if completed_jobs_count > 0:
+                debug_print(f"Removed {completed_jobs_count} completed jobs from queue")
         
         # Find all processing jobs and move them to top
         processing_jobs = []
@@ -1001,16 +888,14 @@ def reset_processing_jobs():
         # Add them back at the top in reverse order (so they maintain their relative order)
         for job in reversed(failed_jobs):
             job_queue.insert(0, job)
-            debug_print(f"marked previously failed job as pending and Moved job {job.job_name} to top of queue")
+            debug_print(f"marked previously aborted job as pending and Moved job {job.job_name} to top of queue")
         
-        # Update in-memory queue and save to JSON
         save_queue()
         debug_print(f"{len(processing_jobs)} aborted jobs found and moved to the top as pending")
         debug_print(f"{len(failed_jobs)} failed jobs found and moved to the top as pending")
         debug_print(f"Total jobs in the queue:{len(job_queue)}")
     except Exception as e:
-        alert_print(f"Error in reset_processing_jobs: {str(e)}")
-        traceback.print_exc()
+        alert_print(f"Error resetting processing jobs: {str(e)}")
 
 # Quick prompts management functions
 def get_default_prompt():
@@ -2041,7 +1926,8 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
                 update_queue_table(),         # queue_table
                 update_queue_display()        # queue_display
             )
-
+        if not job_name:  # This will catch both None and empty string
+            job_name = "job"  # Remove the underscore here since we add it later
         # Handle text-to-video case (no input image)
         if input_image is None:
             job_name = add_to_queue(
@@ -2069,17 +1955,18 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
         # Handle image-to-video cases
         if isinstance(input_image, list):
             # Multiple images case
+            original_job_name = job_name  # Store the original job name prefix
             for img_tuple in input_image:
                 input_image = np.array(Image.open(img_tuple[0]))  # Convert to numpy array
                 
-                # Add job for each image
+                # Add job for each image, using original job name prefix
                 job_name = add_to_queue(
                     prompt=prompt,
                     n_prompt=n_prompt,
                     input_image=input_image,
                     video_length=video_length,
                     seed=seed,
-                    job_name=job_name,
+                    job_name=original_job_name,  # Use original prefix each time
                     use_teacache=use_teacache,
                     gpu_memory_preservation=gpu_memory_preservation,
                     steps=steps,
@@ -2342,19 +2229,19 @@ def handle_queue_action(evt: gr.SelectData):
         if job and job.status in ["pending", "completed"]:  # Allow editing both pending and completed jobs
             # Return the job parameters for editing and show edit group
             return (
-                job.prompt,
-                job.n_prompt,
-                job.video_length,
-                job.seed,
-                job.use_teacache,
-                job.gpu_memory_preservation,
-                job.steps,
-                job.cfg,
-                job.gs,
-                job.rs,
-                job.mp4_crf,
-                job.keep_temp_png,
-                job.keep_temp_mp4,
+            job.prompt,
+            job.n_prompt,
+            job.video_length,
+            job.seed,
+            job.use_teacache,
+            job.gpu_memory_preservation,
+            job.steps,
+            job.cfg,
+            job.gs,
+            job.rs,
+            job.mp4_crf,
+            job.keep_temp_png,
+            job.keep_temp_mp4,
                 job.keep_temp_json,
                 job_name,
                 gr.update(visible=True)  # Show edit group
@@ -2388,9 +2275,9 @@ def copy_job(job_name):
         if not original_job:
             return update_queue_table(), update_queue_display()
             
-        # Create a new job ID by keeping the prefix and replacing the last 8 chars
-        prefix = original_job.job_name[:-8] if len(original_job.job_name) > 8 else ""
-        new_job_name = prefix + uuid.uuid4().hex[:8]
+        # Create a new job ID by keeping the prefix and adding a new hex suffix
+        prefix = original_job.job_name.rsplit('_', 1)[0]  # Get everything before the last underscore
+        new_job_name = f"{prefix}_{uuid.uuid4().hex[:8]}"
         
         # Copy the image file
         if os.path.exists(original_job.image_path):
@@ -2625,9 +2512,6 @@ def delete_failed_jobs():
     debug_print(f"Total jobs in the queue:{len(job_queue)}")
     return update_queue_table(), update_queue_display()
 
-def cancel_edit():
-    """Cancel editing and hide the edit window"""
-    return update_queue_table(), update_queue_display(), gr.update(visible=False)
 
 def hide_edit_window():
     """Hide the edit window without saving changes"""
@@ -2775,13 +2659,38 @@ with block:
                     with gr.Row():
                         with gr.Column():
                             gr.Markdown("### this will set the new system defaults, it REQUIRES RESTART to take")
-                            settings_outputs_folder = gr.Textbox(label="Outputs Folder this is where your videos will be saved", value=Config.OUTPUTS_FOLDER)
+                            settings_outputs_folder = gr.Textbox(label="Outputs Folder", value=Config.OUTPUTS_FOLDER)
                             settings_job_history_folder = gr.Textbox(label="Job History Folder this is where the job settings json file and job input image is stored", value=Config.JOB_HISTORY_FOLDER)
                             settings_debug_mode = gr.Checkbox(label="Debug Mode", value=Config.DEBUG_MODE)
+                            settings_keep_completed = gr.Checkbox(label="Keep Completed Jobs", value=Config.KEEP_COMPLETED)
                             
                             with gr.Row():
-                                save_system_defaults_button = gr.Button("Save System Settings")
-                                restore_system_defaults_button = gr.Button("Restore System Defaults")
+                                save_settings_button = gr.Button("Save Settings")
+                                restore_defaults_button = gr.Button("Restore Defaults")
+                            
+                            settings_status = gr.Markdown()
+                            
+                            save_settings_button.click(
+                                fn=save_system_settings_from_ui,
+                                inputs=[
+                                    settings_outputs_folder,
+                                    settings_job_history_folder,
+                                    settings_debug_mode,
+                                    settings_keep_completed
+                                ],
+                                outputs=[settings_status]
+                            )
+                            
+                            restore_defaults_button.click(
+                                fn=restore_system_defaults,
+                                inputs=[
+                                    settings_outputs_folder,
+                                    settings_job_history_folder,
+                                    settings_debug_mode,
+                                    settings_keep_completed
+                                ],
+                                outputs=[settings_status]
+                            )
 
     # Connect settings buttons and all other UI event bindings at the top level (not in a nested with block)
     save_defaults_button.click(
@@ -2804,25 +2713,7 @@ with block:
         ]
     )
 
-    save_system_defaults_button.click(
-        fn=save_system_settings_from_ui,
-        inputs=[
-            settings_outputs_folder,
-            settings_job_history_folder,
-            settings_debug_mode
-        ],
-        outputs=[gr.Markdown()]
-    )
 
-    restore_system_defaults_button.click(
-        fn=restore_system_defaults,
-        inputs=[],
-        outputs=[
-            settings_outputs_folder,
-            settings_job_history_folder,
-            settings_debug_mode
-        ]
-    )
 
     # Set default prompt and length
     default_prompt, default_n_prompt, default_length, default_gs, default_steps, default_teacache, default_seed, default_cfg, default_rs, default_gpu_memory, default_mp4_crf, default_keep_temp_png, default_keep_temp_mp4, default_keep_temp_json = get_default_prompt()
