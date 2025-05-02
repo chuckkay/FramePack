@@ -1504,7 +1504,7 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
                 hint = f'Sampling {current_step}/{steps}'
                 current_time = max(0, (total_generated_latent_frames * 4 - 3) / 30)
                 percent_done = (current_time / video_length) * 100
-                desc = f'Current Job is running, Total generated frames: {int(max(0, total_generated_latent_frames * 4 - 3))}, Video length: {current_time:.2f} seconds of {video_length} at (FPS-30). The video is being extended now and is {percent_done:.1f}% done'
+                desc = f'Current Job {job_name} video is being created now and is {percent_done:.1f}% done, Total generated frames: {int(max(0, total_generated_latent_frames * 4 - 3))}, Video length: {current_time:.2f} seconds of {video_length} at (FPS-30). '
                 stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
                 return
 
@@ -1953,27 +1953,68 @@ def end_process():
             if job.status == "processing":
                 processing_job = job
                 break
-        # Then process all jobs
-        for job in job_queue:
-            if job.status == "processing":
-                mark_job_pending(job)  # Use new function to mark as pending
-                save_queue()
-                queue_table_update, queue_display_update = mark_job_pending(job)  # Use new function to mark as pending
-                jobs_changed += 1
         
-        # If we found a processing job, move it to the top
-        if processing_job:
-            job_queue.remove(processing_job)
-            job_queue.insert(0, processing_job)
+            if processing_job.image_path == "text2video":
+                mp4_path = os.path.join(outputs_folder, f'{processing_job.job_name}.mp4')
+                if os.path.exists(mp4_path):
+                    import cv2
+
+                    cap = cv2.VideoCapture(mp4_path)
+                    # Seek to the 30th frame (zero-based index 29)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 29)
+                    ret, frame = cap.read()
+                    if ret:
+                        # Resize to 200×200
+                        thumb = cv2.resize(frame, (200, 200), interpolation=cv2.INTER_AREA)
+                        text = ""
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        scale = 1
+                        thickness = 2
+                        color = (0, 255, 255)  # BGR for yellow
+
+                        # Calculate text size to center it
+                        (text_w, text_h), _ = cv2.getTextSize(text, font, scale, thickness)
+                        x = (thumb.shape[1] - text_w) // 2
+                        y = (thumb.shape[0] + text_h) // 2
+
+                        cv2.putText(
+                            thumb,
+                            text,
+                            (x, y),
+                            font,
+                            scale,
+                            color,
+                            thickness,
+                            cv2.LINE_AA
+                        )
+
+                        thumb_path = os.path.join(temp_queue_images, f'thumb_{processing_job.job_name}.png')
+                        queue_path = os.path.join(temp_queue_images, f'queue_image_{processing_job.job_name}.png')
+                        cv2.imwrite(thumb_path, thumb)
+                        # cv2.imwrite(queue_path, thumb)
+                        processing_job.thumbnail = thumb_path
+
+                    cap.release()
+
+
+            # this is done with the queue_table_update mark_job_pending(processing_job) 
+            save_queue()
+            queue_table_update, queue_display_update = mark_job_pending(processing_job) 
+            jobs_changed += 1
         
-        save_queue()
-        return (
-            update_queue_table(),         # queue_table
-            update_queue_display(),       # queue_display
-            gr.update(interactive=True),  # start_button
-            gr.update(interactive=False), # end_button
-            gr.update(interactive=True)   # queue_button (always enabled)
-        )
+            # If we found a processing job, move it to the top
+            if processing_job:
+                job_queue.remove(processing_job)
+                job_queue.insert(0, processing_job)
+        
+            save_queue()
+            return (
+                update_queue_table(),         # queue_table
+                update_queue_display(),       # queue_display
+                gr.update(interactive=True),  # start_button
+                gr.update(interactive=False), # end_button
+                gr.update(interactive=True)   # queue_button (always enabled)
+            )
     except Exception as e:
         alert_print(f"Error in end_process: {str(e)}")
         traceback.print_exc()
@@ -2298,7 +2339,7 @@ def handle_queue_action(evt: gr.SelectData):
     elif button_clicked == "✎":
         # Get the job
         job = next((j for j in job_queue if j.job_name == job_name), None)
-        if job and job.status == "pending":
+        if job and job.status in ["pending", "completed"]:  # Allow editing both pending and completed jobs
             # Return the job parameters for editing and show edit group
             return (
                 job.prompt,
@@ -2524,14 +2565,13 @@ def edit_job(job_name, new_prompt, new_n_prompt, new_video_length, new_seed, new
         # Find the job
         for job in job_queue:
             if job.job_name == job_name:
-                # Only allow editing if job is pending
+                # Only allow editing if job is pending or completed
                 if job.status not in ("pending", "completed"):
                     return update_queue_table(), update_queue_display(), gr.update(visible=False)
 
                 # Update job parameters
                 job.prompt = new_prompt
                 job.n_prompt = new_n_prompt
-                job.status = "pending"
                 job.video_length = new_video_length
                 job.seed = new_seed
                 job.use_teacache = new_use_teacache
@@ -2544,6 +2584,11 @@ def edit_job(job_name, new_prompt, new_n_prompt, new_video_length, new_seed, new
                 job.keep_temp_png = new_keep_temp_png
                 job.keep_temp_mp4 = new_keep_temp_mp4
                 job.keep_temp_json = new_keep_temp_json
+                
+                # If job was completed, change to pending and mark it
+                if job.status == "completed":
+                    job.status = "pending"
+                    mark_job_pending(job)
                 
                 # Save changes
                 save_queue()
@@ -2579,6 +2624,16 @@ def delete_failed_jobs():
     save_queue()
     debug_print(f"Total jobs in the queue:{len(job_queue)}")
     return update_queue_table(), update_queue_display()
+
+def cancel_edit():
+    """Cancel editing and hide the edit window"""
+    return update_queue_table(), update_queue_display(), gr.update(visible=False)
+
+def hide_edit_window():
+    """Hide the edit window without saving changes"""
+    return gr.update(visible=False)
+
+
 
 block = gr.Blocks(css=css).queue()
 
@@ -2665,7 +2720,9 @@ with block:
                     edit_job_name = gr.Textbox(label="Job ID", visible=False)
                     edit_group = gr.Group(visible=False)  # Hidden by default
                     with edit_group:
-                        save_edit_button = gr.Button("Save Changes")
+                        with gr.Row():
+                            save_edit_button = gr.Button("Save Changes")
+                            cancel_edit_button = gr.Button("Cancel changes")
                         edit_prompt = gr.Textbox(label="Edit Prompt")
                         edit_n_prompt = gr.Textbox(label="Edit Negative Prompt")
                         edit_video_length = gr.Slider(label="Edit Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
@@ -2883,24 +2940,13 @@ with block:
     )
     save_edit_button.click(
         fn=edit_job,
-        inputs=[
-            edit_job_name,
-            edit_prompt,
-            edit_n_prompt,
-            edit_video_length,
-            edit_seed,
-            edit_use_teacache,
-            edit_gpu_memory_preservation,
-            edit_steps,
-            edit_cfg,
-            edit_gs,
-            edit_rs,
-            edit_mp4_crf,
-            edit_keep_temp_png,
-            edit_keep_temp_mp4,
-            edit_keep_temp_json
-        ],
+        inputs=[edit_job_name, edit_prompt, edit_n_prompt, edit_video_length, edit_seed, edit_use_teacache, edit_gpu_memory_preservation, edit_steps, edit_cfg, edit_gs, edit_rs, edit_mp4_crf, edit_keep_temp_png, edit_keep_temp_mp4, edit_keep_temp_json],
         outputs=[queue_table, queue_display, edit_group]
+    )
+
+    cancel_edit_button.click(
+        fn=hide_edit_window,
+        outputs=[edit_group]
     )
 
     ips = [input_image, prompt, n_prompt, seed, video_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json]
