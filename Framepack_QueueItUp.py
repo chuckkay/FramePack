@@ -1424,6 +1424,8 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
     total_latent_sections = int(max(round(total_latent_sections), 1))
     # job_failed = None not used yet
     # job_id = generate_timestamp() #not used yet
+
+
     stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...'))))
 
     # Save the input image with metadata
@@ -1594,6 +1596,7 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
                 real_guidance_scale=cfg,
                 distilled_guidance_scale=gs,
                 guidance_rescale=rs,
+                # shift=3.0,
                 num_inference_steps=steps,
                 generator=rnd,
                 prompt_embeds=llama_vec,
@@ -1803,6 +1806,19 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
         )
         return
     
+    # Initial yield with updated queue display and button states
+    yield (
+        gr.update(interactive=True),   # queue_button (always enabled)
+        gr.update(interactive=False),  # start_button
+        gr.update(interactive=True),   # end_button
+        gr.update(visible=True),       # preview_image
+        None,                          # result_video
+        '',    # progress_desc
+        '',    # progress_bar
+        update_queue_display(),        # queue_display
+        update_queue_table()           # queue_table
+    )
+
     # Start processing
     stream = AsyncStream()
     debug_print(f"Starting worker for job {next_job.job_name}")
@@ -1832,19 +1848,7 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
              process_cfg, process_gs, process_rs, 
              process_gpu_memory_preservation, process_teacache, process_mp4_crf, process_keep_temp_png, process_keep_temp_mp4, process_keep_temp_json,next_job)
 
-    # Initial yield with updated queue display and button states
-    yield (
-        gr.update(interactive=True),   # queue_button (always enabled)
-        gr.update(interactive=False),  # start_button
-        gr.update(interactive=True),   # end_button
-        gr.update(visible=True),       # preview_image
-        None,                          # result_video
-        '',    # progress_desc
-        '',    # progress_bar
-        update_queue_display(),        # queue_display
-        update_queue_table()           # queue_table
-    )
-
+    output_filename = None
     # Process output queue
     while True:
         try:
@@ -1852,26 +1856,27 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
 
             if flag == 'file':
                 output_filename = data
+                extract_thumb_from_processing_mp4(next_job, output_filename)
                 yield (
-                    gr.update(interactive=True),   # queue_button (always enabled)
+                    gr.update(interactive=True),   # queue_button
                     gr.update(interactive=False),  # start_button
                     gr.update(interactive=True),   # end_button
-                    gr.update(visible=False),  # preview_image (hide when showing video)
-                    output_filename,  # result_video (show the actual video)
-                    desc,  # progress_desc
-                    html,  # progress_bar
+                    gr.update(visible=False),      # preview_image
+                    output_filename,               # result_video (direct value)
+                    gr.update(),                   # progress_desc
+                    gr.update(),                   # progress_bar
                     update_queue_display(),        # queue_display
-                    update_queue_table()         # queue_table
+                    update_queue_table()           # queue_table
                 )
 
             if flag == 'progress':
                 preview, desc, html = data
                 yield (
-                    gr.update(interactive=True),   # queue_button (always enabled)
+                    gr.update(interactive=True),   # queue_button
                     gr.update(interactive=False),  # start_button
                     gr.update(interactive=True),   # end_button
                     gr.update(visible=True, value=preview),  # preview_image
-                    None,  # result_video (don't update during progress)
+                    gr.update(),  # result_video
                     desc,  # progress_desc
                     html,  # progress_bar
                     update_queue_display(),        # queue_display
@@ -1880,7 +1885,18 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
 
             if flag == 'end':
                 completed_job = data
-                
+                yield (
+                    gr.update(interactive=True),   # queue_button
+                    gr.update(interactive=True),   # start_button
+                    gr.update(interactive=False),  # end_button
+                    gr.update(visible=False),  # preview_image
+                    output_filename,  # result_video
+                    '',  # progress_desc
+                    '',  # progress_bar
+                    update_queue_display(),        # queue_display
+                    update_queue_table()         # queue_table
+                )
+
                 if stream.input_queue.top() == 'end':
                     aborted_job = next((job for job in job_queue if job.status == "processing"), None)
                     clean_up_temp_mp4png(aborted_job)
@@ -2000,6 +2016,15 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
 def end_process():
     """Handle end generation button click - stop all processes and change all processing jobs to pending jobs"""
     stream.input_queue.push('end')
+    return (
+        update_queue_table(),  # dataframe
+        update_queue_display(),  # gallery
+        gr.update(interactive=True),  # queue_button
+        gr.update(interactive=True),  # start_button
+        gr.update(interactive=False)  # end_button
+    )
+    
+
 def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_name, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
     """Handle adding a new job to the queue"""
     try:
