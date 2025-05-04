@@ -1,4 +1,4 @@
-# 🚂 QueueItUp for FramePack
+# 🚂 QueueItUp for FramePack now With F1 Model
 
 > A lightweight robust job-queue mod for lllyasviel’s FramePack WebUI
 > packed with great enhancements to Make framepack even better.
@@ -36,6 +36,9 @@
 
 - **Save/restore new job Defaults**  
   Store your preferred settings as defaults—or revert to the original defaults with one click.
+
+- **Set Model Defaults**
+  in the settings tab you can now set which modle you want to use (right now just 2 available original and F1)
 
 - **Change System Defaults**  
   change output folder and job history folder, turn on or off debugging mode
