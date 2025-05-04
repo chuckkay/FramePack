@@ -36,6 +36,38 @@ from diffusers_helper.bucket_tools import find_nearest_bucket
 import shutil
 import cv2
 
+def get_available_models():
+    """Get list of available models from hub directory"""
+    hub_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hf_download", "hub")
+    models = {
+        'text_encoder': [],
+        'text_encoder_2': [],
+        'tokenizer': [],
+        'tokenizer_2': [],
+        'vae': [],
+        'feature_extractor': [],
+        'image_encoder': [],
+        'transformer': []
+    }
+    
+    if os.path.exists(hub_dir):
+        for item in os.listdir(hub_dir):
+            if os.path.isdir(os.path.join(hub_dir, item)):
+                # Map models to their correct categories
+                if "hunyuanvideo" in item.lower():
+                    models['text_encoder'].append(item)
+                    models['text_encoder_2'].append(item)
+                    models['tokenizer'].append(item)
+                    models['tokenizer_2'].append(item)
+                    models['vae'].append(item)
+                elif "flux_redux" in item.lower():
+                    models['feature_extractor'].append(item)
+                    models['image_encoder'].append(item)
+                elif "framepack" in item.lower():
+                    models['transformer'].append(item)
+    
+    return models
+
 # Path to settings file
 SETTINGS_FILE = os.path.join(os.getcwd(), 'settings.ini')
 
@@ -54,10 +86,16 @@ YELLOW = '\033[93m'
 RED = '\033[31m'
 GREEN = '\033[92m'
 RESET = '\033[0m'
-
+try:
+# Try to load arial font, fall back to default if not available
+    font = ImageFont.truetype("arial.ttf", 16)
+    small_font = ImageFont.truetype("arial.ttf", 12)
+except:
+    font = ImageFont.load_default()
+    small_font = ImageFont.load_default()
 # Global variables
 debug_mode = False
-keep_completed = True
+keep_completed_jobs = True
 
 def debug_print(message):
     """Print debug messages in yellow color"""
@@ -74,9 +112,50 @@ def info_print(message):
 
 
 def save_settings(config):
-    """Save settings to settings.ini file"""
+    """Save settings to settings.ini"""
     with open(SETTINGS_FILE, 'w') as f:
         config.write(f)
+
+def save_ips_defaults_from_ui(use_teacache, seed, video_length, steps, cfg, gs, rs, gpu_memory, mp4_crf,
+                           keep_temp_png, keep_temp_mp4, keep_temp_json,
+                           model_name, text_encoder, text_encoder_2, tokenizer, tokenizer_2,
+                           vae, feature_extractor, image_encoder, transformer):
+    """Save IPS defaults from UI settings"""
+    config = load_settings()
+    if 'IPS Defaults' not in config:
+        config['IPS Defaults'] = {}
+    section = config['IPS Defaults']
+    
+    # Save IPS defaults
+    section['DEFAULT_USE_TEACACHE'] = repr(use_teacache)
+    section['DEFAULT_SEED'] = repr(seed)
+    section['DEFAULT_VIDEO_LENGTH'] = repr(video_length)
+    section['DEFAULT_STEPS'] = repr(steps)
+    section['DEFAULT_CFG'] = repr(cfg)
+    section['DEFAULT_GS'] = repr(gs)
+    section['DEFAULT_RS'] = repr(rs)
+    section['DEFAULT_GPU_MEMORY'] = repr(gpu_memory)
+    section['DEFAULT_MP4_CRF'] = repr(mp4_crf)
+    section['DEFAULT_KEEP_TEMP_PNG'] = repr(keep_temp_png)
+    section['DEFAULT_KEEP_TEMP_MP4'] = repr(keep_temp_mp4)
+    section['DEFAULT_KEEP_TEMP_JSON'] = repr(keep_temp_json)
+    
+    # Save model settings
+    if 'Model Settings' not in config:
+        config['Model Settings'] = {}
+    section = config['Model Settings']
+    section['DEFAULT_MODEL_NAME'] = repr(model_name)
+    section['DEFAULT_TEXT_ENCODER'] = repr(text_encoder)
+    section['DEFAULT_TEXT_ENCODER_2'] = repr(text_encoder_2)
+    section['DEFAULT_TOKENIZER'] = repr(tokenizer)
+    section['DEFAULT_TOKENIZER_2'] = repr(tokenizer_2)
+    section['DEFAULT_VAE'] = repr(vae)
+    section['DEFAULT_FEATURE_EXTRACTOR'] = repr(feature_extractor)
+    section['DEFAULT_IMAGE_ENCODER'] = repr(image_encoder)
+    section['DEFAULT_TRANSFORMER'] = repr(transformer)
+    
+    save_settings(config)
+    return "Settings saved successfully!"
 
 @dataclass
 class Config:
@@ -97,11 +176,22 @@ class Config:
     DEFAULT_KEEP_TEMP_MP4: bool = None
     DEFAULT_KEEP_TEMP_JSON: bool = None
 
+    # Model settings
+    DEFAULT_MODEL_NAME: str = None
+    DEFAULT_TEXT_ENCODER: str = None
+    DEFAULT_TEXT_ENCODER_2: str = None
+    DEFAULT_TOKENIZER: str = None
+    DEFAULT_TOKENIZER_2: str = None
+    DEFAULT_VAE: str = None
+    DEFAULT_FEATURE_EXTRACTOR: str = None
+    DEFAULT_IMAGE_ENCODER: str = None
+    DEFAULT_TRANSFORMER: str = None
+
     # System defaults
     OUTPUTS_FOLDER: str = None
     JOB_HISTORY_FOLDER: str = None
     DEBUG_MODE: bool = None
-    KEEP_COMPLETED: bool = None
+    KEEP_COMPLETED_JOBS: bool = None
 
     @classmethod
     def get_original_defaults(cls):
@@ -121,10 +211,19 @@ class Config:
             'DEFAULT_KEEP_TEMP_PNG': True,
             'DEFAULT_KEEP_TEMP_MP4': False,
             'DEFAULT_KEEP_TEMP_JSON': True,
+            'DEFAULT_MODEL_NAME': "models--lllyasviel--FramePackI2V_HY",
+            'DEFAULT_TEXT_ENCODER': "models--hunyuanvideo-community--HunyuanVideo",
+            'DEFAULT_TEXT_ENCODER_2': "models--hunyuanvideo-community--HunyuanVideo",
+            'DEFAULT_TOKENIZER': "models--hunyuanvideo-community--HunyuanVideo",
+            'DEFAULT_TOKENIZER_2': "models--hunyuanvideo-community--HunyuanVideo",
+            'DEFAULT_VAE': "models--hunyuanvideo-community--HunyuanVideo",
+            'DEFAULT_FEATURE_EXTRACTOR': "models--lllyasviel--flux_redux_bfl",
+            'DEFAULT_IMAGE_ENCODER': "models--lllyasviel--flux_redux_bfl",
+            'DEFAULT_TRANSFORMER': "models--lllyasviel--FramePackI2V_HY",
             'OUTPUTS_FOLDER': './outputs/',
             'JOB_HISTORY_FOLDER': './job_history/',
             'DEBUG_MODE': False,
-            'KEEP_COMPLETED': True
+            'KEEP_COMPLETED_JOBS': True
         }
 
     @classmethod
@@ -148,6 +247,24 @@ class Config:
                     setattr(cls, key, default_value)
                     section[key] = repr(default_value)
                     save_settings(config)
+
+        # Load Model Settings section
+        if 'Model Settings' not in config:
+            config['Model Settings'] = {}
+        section = config['Model Settings']
+        model_defaults = [
+            'DEFAULT_MODEL_NAME', 'DEFAULT_TEXT_ENCODER', 'DEFAULT_TEXT_ENCODER_2',
+            'DEFAULT_TOKENIZER', 'DEFAULT_TOKENIZER_2', 'DEFAULT_VAE',
+            'DEFAULT_FEATURE_EXTRACTOR', 'DEFAULT_IMAGE_ENCODER', 'DEFAULT_TRANSFORMER'
+        ]
+        for key in model_defaults:
+            try:
+                value = section.get(key, repr(defaults[key]))
+                setattr(cls, key, value.strip("'"))
+            except (KeyError, ValueError):
+                setattr(cls, key, defaults[key])
+                section[key] = repr(defaults[key])
+                save_settings(config)
 
         # Load System Defaults section
         if 'System Defaults' not in config:
@@ -185,11 +302,23 @@ class Config:
         for key in ips_defaults:
             section[key] = repr(getattr(cls, key))
 
+        # Save Model Settings section
+        if 'Model Settings' not in config:
+            config['Model Settings'] = {}
+        section = config['Model Settings']
+        model_defaults = [
+            'DEFAULT_MODEL_NAME', 'DEFAULT_TEXT_ENCODER', 'DEFAULT_TEXT_ENCODER_2',
+            'DEFAULT_TOKENIZER', 'DEFAULT_TOKENIZER_2', 'DEFAULT_VAE',
+            'DEFAULT_FEATURE_EXTRACTOR', 'DEFAULT_IMAGE_ENCODER', 'DEFAULT_TRANSFORMER'
+        ]
+        for key in model_defaults:
+            section[key] = repr(getattr(cls, key))
+
         # Save System Defaults section
         if 'System Defaults' not in config:
             config['System Defaults'] = {}
         section = config['System Defaults']
-        system_defaults = ['OUTPUTS_FOLDER', 'JOB_HISTORY_FOLDER', 'DEBUG_MODE']
+        system_defaults = ['OUTPUTS_FOLDER', 'JOB_HISTORY_FOLDER', 'DEBUG_MODE', 'KEEP_COMPLETED_JOBS']
         for key in system_defaults:
             section[key] = str(getattr(cls, key))
 
@@ -276,96 +405,124 @@ def load_settings():
     
     return config
 
-def save_settings_from_ui(use_teacache, seed, video_length, steps, cfg, gs, rs, gpu_memory, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
-    """Save settings from UI to settings.ini and update Config class values"""
-    try:
-        config = load_settings()
-        section = config['IPS Defaults']
-        
-        # Update settings.ini
-        section['DEFAULT_USE_TEACACHE'] = repr(use_teacache)
-        section['DEFAULT_SEED'] = repr(seed)
-        section['DEFAULT_VIDEO_LENGTH'] = repr(video_length)
-        section['DEFAULT_STEPS'] = repr(steps)
-        section['DEFAULT_CFG'] = repr(cfg)
-        section['DEFAULT_GS'] = repr(gs)
-        section['DEFAULT_RS'] = repr(rs)
-        section['DEFAULT_GPU_MEMORY'] = repr(gpu_memory)
-        section['DEFAULT_MP4_CRF'] = repr(mp4_crf)
-        section['DEFAULT_KEEP_TEMP_PNG'] = repr(keep_temp_png)
-        section['DEFAULT_KEEP_TEMP_MP4'] = repr(keep_temp_mp4)
-        section['DEFAULT_KEEP_TEMP_JSON'] = repr(keep_temp_json)
-        
-        # Save to file
-        save_settings(config)
-        
-        # Update Config class values in memory
-        Config.DEFAULT_USE_TEACACHE = use_teacache
-        Config.DEFAULT_SEED = seed
-        Config.DEFAULT_VIDEO_LENGTH = video_length
-        Config.DEFAULT_STEPS = steps
-        Config.DEFAULT_CFG = cfg
-        Config.DEFAULT_GS = gs
-        Config.DEFAULT_RS = rs
-        Config.DEFAULT_GPU_MEMORY = gpu_memory
-        Config.DEFAULT_MP4_CRF = mp4_crf
-        Config.DEFAULT_KEEP_TEMP_PNG = keep_temp_png
-        Config.DEFAULT_KEEP_TEMP_MP4 = keep_temp_mp4
-        Config.DEFAULT_KEEP_TEMP_JSON = keep_temp_json
-        
-        debug_print("Settings saved successfully")
-        return "Settings saved successfully! This does not change any settings for jobs already in the queue, but you can change pending job settings in the edit jobs tab."
-    except Exception as e:
-        alert_print(f"Error saving settings: {str(e)}")
-        return f"Error saving settings: {str(e)}"
-
-def restore_original_defaults():
-    """Restore original default values"""
-    global Config, settings_config
-    defaults = Config.get_original_defaults()
-    for key, value in defaults.items():
-        setattr(Config, key, value)
-    Config.to_settings(settings_config)
-    return (
-        Config.DEFAULT_USE_TEACACHE,
-        Config.DEFAULT_SEED,
-        Config.DEFAULT_VIDEO_LENGTH,
-        Config.DEFAULT_STEPS,
-        Config.DEFAULT_CFG,
-        Config.DEFAULT_GS,
-        Config.DEFAULT_RS,
-        Config.DEFAULT_GPU_MEMORY,
-        Config.DEFAULT_MP4_CRF,
-        Config.DEFAULT_KEEP_TEMP_PNG,
-        Config.DEFAULT_KEEP_TEMP_MP4,
-        Config.DEFAULT_KEEP_TEMP_JSON
-    )
-
-def save_system_settings_from_ui(outputs_folder, job_history_folder, debug_mode, keep_completed):
-    """Save system settings from UI to settings.ini"""
-    config = configparser.ConfigParser()
-    config.read('settings.ini')
+def save_settings_from_ui(outputs_folder, job_history_folder, debug_mode, keep_completed_jobs,
+                         model_name, text_encoder, text_encoder_2, tokenizer, tokenizer_2,
+                         vae, feature_extractor, image_encoder, transformer):
+    """Save settings from UI inputs"""
+    settings_config = configparser.ConfigParser()
     
-    if 'System' not in config:
-        config['System'] = {}
+    # Create all required sections
+    settings_config['IPS Defaults'] = {}
+    settings_config['Model Settings'] = {}
+    settings_config['System Defaults'] = {}
     
-    config['System']['outputs_folder'] = outputs_folder
-    config['System']['job_history_folder'] = job_history_folder
-    config['System']['debug_mode'] = str(debug_mode)
-    config['System']['keep_completed'] = str(keep_completed)
+    # System Settings
+    settings_config['System Defaults'] = {
+        'OUTPUTS_FOLDER': repr(outputs_folder),
+        'JOB_HISTORY_FOLDER': repr(job_history_folder),
+        'DEBUG_MODE': repr(debug_mode),
+        'KEEP_COMPLETED_JOBS': repr(keep_completed_jobs)
+    }
     
-    with open('settings.ini', 'w') as f:
-        config.write(f)
+    # Model Settings
+    settings_config['Model Settings'] = {
+        'DEFAULT_MODEL_NAME': repr(model_name),
+        'DEFAULT_TEXT_ENCODER': repr(text_encoder),
+        'DEFAULT_TEXT_ENCODER_2': repr(text_encoder_2),
+        'DEFAULT_TOKENIZER': repr(tokenizer),
+        'DEFAULT_TOKENIZER_2': repr(tokenizer_2),
+        'DEFAULT_VAE': repr(vae),
+        'DEFAULT_FEATURE_EXTRACTOR': repr(feature_extractor),
+        'DEFAULT_IMAGE_ENCODER': repr(image_encoder),
+        'DEFAULT_TRANSFORMER': repr(transformer)
+    }
     
-    # Update Config class
+    # Update global Config object
     Config.OUTPUTS_FOLDER = outputs_folder
     Config.JOB_HISTORY_FOLDER = job_history_folder
     Config.DEBUG_MODE = debug_mode
-    Config.KEEP_COMPLETED = keep_completed
+    Config.KEEP_COMPLETED_JOBS = keep_completed_jobs
+    Config.DEFAULT_MODEL_NAME = model_name
+    Config.DEFAULT_TEXT_ENCODER = text_encoder
+    Config.DEFAULT_TEXT_ENCODER_2 = text_encoder_2
+    Config.DEFAULT_TOKENIZER = tokenizer
+    Config.DEFAULT_TOKENIZER_2 = tokenizer_2
+    Config.DEFAULT_VAE = vae
+    Config.DEFAULT_FEATURE_EXTRACTOR = feature_extractor
+    Config.DEFAULT_IMAGE_ENCODER = image_encoder
+    Config.DEFAULT_TRANSFORMER = transformer
     
-    return f"Settings saved successfully!\nOutputs Folder: {outputs_folder}\nJob History Folder: {job_history_folder}\nDebug Mode: {debug_mode}\nKeep Completed: {keep_completed}"
+    Config.to_settings(settings_config)
+    return "Settings saved successfully. Restart required for changes to take effect."
 
-def restore_system_defaults():
+def restore_original_defaults(return_ips_defaults=False):
+    """Restore original default values"""
+    defaults = Config.get_original_defaults()
+    if return_ips_defaults:
+        return [
+            defaults['DEFAULT_USE_TEACACHE'],
+            defaults['DEFAULT_SEED'],
+            defaults['DEFAULT_VIDEO_LENGTH'],
+            defaults['DEFAULT_STEPS'],
+            defaults['DEFAULT_CFG'],
+            defaults['DEFAULT_GS'],
+            defaults['DEFAULT_RS'],
+            defaults['DEFAULT_GPU_MEMORY'],
+            defaults['DEFAULT_MP4_CRF'],
+            defaults['DEFAULT_KEEP_TEMP_PNG'],
+            defaults['DEFAULT_KEEP_TEMP_MP4'],
+            defaults['DEFAULT_KEEP_TEMP_JSON'],
+            defaults['DEFAULT_MODEL_NAME'],
+            defaults['DEFAULT_TEXT_ENCODER'],
+            defaults['DEFAULT_TEXT_ENCODER_2'],
+            defaults['DEFAULT_TOKENIZER'],
+            defaults['DEFAULT_TOKENIZER_2'],
+            defaults['DEFAULT_VAE'],
+            defaults['DEFAULT_FEATURE_EXTRACTOR'],
+            defaults['DEFAULT_IMAGE_ENCODER'],
+            defaults['DEFAULT_TRANSFORMER']
+        ]
+    else:
+        return [
+            defaults['OUTPUTS_FOLDER'],
+            defaults['JOB_HISTORY_FOLDER'],
+            defaults['DEBUG_MODE'],
+            defaults['KEEP_COMPLETED_JOBS'],
+            defaults['DEFAULT_MODEL_NAME'],
+            defaults['DEFAULT_TEXT_ENCODER'],
+            defaults['DEFAULT_TEXT_ENCODER_2'],
+            defaults['DEFAULT_TOKENIZER'],
+            defaults['DEFAULT_TOKENIZER_2'],
+            defaults['DEFAULT_VAE'],
+            defaults['DEFAULT_FEATURE_EXTRACTOR'],
+            defaults['DEFAULT_IMAGE_ENCODER'],
+            defaults['DEFAULT_TRANSFORMER']
+        ]
+
+def save_system_settings_from_ui(outputs_folder, job_history_folder, debug_mode, keep_completed_jobs):
+    """Save system settings from UI inputs"""
+    global Config, settings_config
+    
+    # Update config
+    config = configparser.ConfigParser()
+    config.read(settings_config)
+    config['System']['outputs_folder'] = outputs_folder
+    config['System']['job_history_folder'] = job_history_folder
+    config['System']['debug_mode'] = str(debug_mode)
+    config['System']['keep_completed_jobs'] = str(keep_completed_jobs)
+    
+    with open(settings_config, 'w') as f:
+        config.write(f)
+    
+    # Update Config object
+    Config.OUTPUTS_FOLDER = outputs_folder
+    Config.JOB_HISTORY_FOLDER = job_history_folder
+    Config.DEBUG_MODE = debug_mode
+    Config.KEEP_COMPLETED_JOBS = keep_completed_jobs
+    
+    return f"Settings saved successfully!\nOutputs Folder: {outputs_folder}\nJob History Folder: {job_history_folder}\nDebug Mode: {debug_mode}\nKeep Completed Jobs: {keep_completed_jobs}"
+
+def restore_system_defaults(outputs_folder, job_history_folder, debug_mode, keep_completed_jobs):
     """Restore system settings to original defaults"""
     global Config, settings_config
     
@@ -381,12 +538,13 @@ def restore_system_defaults():
     Config.OUTPUTS_FOLDER = outputs_folder
     Config.JOB_HISTORY_FOLDER = job_history_folder
     Config.DEBUG_MODE = False
+    Config.KEEP_COMPLETED_JOBS = True
     Config.to_settings(settings_config)
     
     # Update local variables
     setup_local_variables()
     
-    return Config.OUTPUTS_FOLDER, Config.JOB_HISTORY_FOLDER, Config.DEBUG_MODE
+    return "System settings have been restored to defaults."
 
 def save_queue():
     """Save queue state to JSON file"""
@@ -425,11 +583,11 @@ def load_queue():
 
 def setup_local_variables():
     """Set up local variables from Config values"""
-    global job_history_folder, outputs_folder, debug_mode, keep_completed
+    global job_history_folder, outputs_folder, debug_mode, keep_completed_jobs
     job_history_folder = Config.JOB_HISTORY_FOLDER
     outputs_folder = Config.OUTPUTS_FOLDER
     debug_mode = Config.DEBUG_MODE
-    keep_completed = Config.KEEP_COMPLETED
+    keep_completed_jobs = Config.KEEP_COMPLETED_JOBS
 
 # Initialize settings
 settings_config = load_settings()
@@ -664,35 +822,39 @@ def create_thumbnail(job, status_change=False):
     }.get(job.status, "white")
     
     # Initialize status overlay
-    status_overlay = "RUNNING" if job.status == "processing" else job.status.upper()
+    status_overlay = "RUNNING" if job.status == "processing" else ("DONE" if job.status == "completed" else job.status.upper())
     
     try:
-    # Try to load arial font, fall back to default if not available
-        font = ImageFont.truetype("arial.ttf", 16)
-        small_font = ImageFont.truetype("arial.ttf", 12)
-    except:
-        font = ImageFont.load_default()
-        small_font = ImageFont.load_default()
-    
-    try:
-       # Handle text-to-video case (job.image_path is text2video)
+       # Handle text-to-video case (job.image_path is text2video) this is being done twice
         if job.image_path == "text2video":
-            debug_print("in create_thumbnail job.image_path is text2video")
+            debug_print(f"in create_thumbnail {job.job_name} has a job.image_path that is {job.image_path}")
             if not job.thumbnail or status_change:  # Create new thumbnail if none exists or status changed
-                debug_print("in create_thumbnail text2video creating new thumbnail")
                 # Create a text-to-video thumbnail
                 img = Image.new('RGB', (200, 200), color='black')
                 draw = ImageDraw.Draw(img)
-                # Add text-to-video indicator
-                draw.text((100, 80), "Text to Video", fill='white', anchor="mm", font=font)
-                draw.text((100, 100), "Generation", fill='white', anchor="mm", font=font)
-                draw.text((100, 120), status_overlay, fill=status_color, anchor="mm", font=small_font)
+                # Calculate text positions using the same approach as the example
+                text1 = "Text to Video"
+                text2 = "Generation"
+                text3 = status_overlay
+                
+                # Get text sizes
+                text1_bbox = draw.textbbox((0, 0), text1, font=font)
+                text2_bbox = draw.textbbox((0, 0), text2, font=font)
+                text3_bbox = draw.textbbox((0, 0), text3, font=font)
+                
+                # Calculate positions to center text
+                x1 = (200 - (text1_bbox[2] - text1_bbox[0])) // 2
+                x2 = (200 - (text2_bbox[2] - text2_bbox[0])) // 2
+                x3 = (200 - (text3_bbox[2] - text3_bbox[0])) // 2
+                
+                # Add text-to-video indicator with calculated positions
+                draw.text((x1, 80), text1, fill='white', font=font)
+                draw.text((x2, 100), text2, fill='white', font=font)
+                draw.text((x3, 120), text3, fill=status_color, font=font)
                 
                 # Save thumbnail
                 thumbnail_path = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
-                debug_print(f"try to save thumbnail to {thumbnail_path}")
                 img.save(thumbnail_path)
-                debug_print(f"thumbnail saved to {thumbnail_path}")
                 job.thumbnail = thumbnail_path
                 save_queue()
             return job.thumbnail
@@ -702,7 +864,15 @@ def create_thumbnail(job, status_change=False):
             # Create missing image thumbnail
             img = Image.new('RGB', (200, 200), color='white')
             draw = ImageDraw.Draw(img)
-            draw.text((100, 100), "MISSING IMAGE", fill='red', anchor="mm", font=font)
+            
+            # Calculate text position for "MISSING IMAGE"
+            text = "MISSING IMAGE"
+            text_bbox = draw.textbbox((0, 0), text, font=font)
+            x = (200 - (text_bbox[2] - text_bbox[0])) // 2
+            y = (200 - (text_bbox[3] - text_bbox[1])) // 2
+            
+            draw.text((x, y), text, fill='red', font=font)
+            
             # Save thumbnail
             thumbnail_path = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
             img.save(thumbnail_path)
@@ -710,28 +880,31 @@ def create_thumbnail(job, status_change=False):
             save_queue()
             return thumbnail_path
 
-        # Normal case - create thumbnail from existing image
-        img = Image.open(job.image_path)
-        width, height = img.size
-        new_height = 200
-        new_width = int((new_height / height) * width)
-        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        
-        # Create a new image with padding
-        new_img = Image.new('RGB', (200, 200), color='black')
-        new_img.paste(img, ((200 - img.width) // 2, (200 - img.height) // 2))
-        
-        # Add status text if provided
-        if status_change:
-            draw = ImageDraw.Draw(new_img)
-            draw.text((100, 100), status_overlay, fill='white', anchor="mm", font=font)
-        
-        # Save thumbnail
-        thumbnail_path = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
-        new_img.save(thumbnail_path)
-        debug_print(f"thumbnail saved {thumbnail_path}")
-        job.thumbnail = thumbnail_path
-        save_queue()
+        # Normal case - create thumbnail from existing image add overlay
+        if job.image_path != "text2video":
+            img = Image.open(job.image_path)
+            width, height = img.size
+            new_height = 200
+            new_width = int((new_height / height) * width)
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            # Create a new image with padding
+            new_img = Image.new('RGB', (200, 200), color='black')
+            new_img.paste(img, ((200 - img.width) // 2, (200 - img.height) // 2))
+            # Add status text if provided
+            if status_change:
+                draw = ImageDraw.Draw(new_img)
+                # Calculate text position for status overlay
+                text_bbox = draw.textbbox((0, 0), status_overlay, font=font)
+                x = (200 - (text_bbox[2] - text_bbox[0])) // 2
+                y = (200 - (text_bbox[3] - text_bbox[1])) // 2
+                draw.text((x, y), status_overlay, fill=status_color, font=font)
+            
+            # Save thumbnail
+            thumbnail_path = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
+            new_img.save(thumbnail_path)
+            debug_print(f"thumbnail saved {thumbnail_path}")
+            job.thumbnail = thumbnail_path
+            save_queue()
         return thumbnail_path
     except Exception as e:
         alert_print(f"Error creating thumbnail: {str(e)}")
@@ -747,7 +920,7 @@ def update_queue_display():
                 # Check if both queue image and thumbnail are missing
                 queue_image_missing = not os.path.exists(job.image_path) if job.image_path else True
                 thumbnail_missing = not os.path.exists(job.thumbnail) if job.thumbnail else True
-                
+                #######
                 if queue_image_missing and thumbnail_missing:
                     # Create missing placeholder images
                     new_thumbnail = create_thumbnail(job, status_change=False)
@@ -846,8 +1019,8 @@ def reset_processing_jobs():
         # First load the queue from JSON
         load_queue()
         
-        # Remove completed jobs if keep_completed is False
-        if not keep_completed:
+        # Remove completed jobs if keep_completed_jobs is False
+        if not keep_completed_jobs:
             completed_jobs_count = len([job for job in job_queue if job.status == "completed"])
             job_queue = [job for job in job_queue if job.status != "completed"]
             # Only print if jobs were actually removed
@@ -992,16 +1165,26 @@ high_vram = free_mem_gb > 60
 print(f'Free VRAM {free_mem_gb} GB')
 print(f'High-VRAM Mode: {high_vram}')
 
-text_encoder = LlamaModel.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='text_encoder', torch_dtype=torch.float16).cpu()
-text_encoder_2 = CLIPTextModel.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='text_encoder_2', torch_dtype=torch.float16).cpu()
-tokenizer = LlamaTokenizerFast.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer')
-tokenizer_2 = CLIPTokenizer.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2')
-vae = AutoencoderKLHunyuanVideo.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='vae', torch_dtype=torch.float16).cpu()
+def convert_model_path(path):
+    """Convert from directory name format to huggingface format"""
+    if path.startswith('models--'):
+        # Convert from "models--org--model" to "org/model"
+        parts = path.split('--')
+        if len(parts) >= 3:
+            return f"{parts[1]}/{parts[2]}"
+    return path
 
-feature_extractor = SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
-image_encoder = SiglipVisionModel.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='image_encoder', torch_dtype=torch.float16).cpu()
+# Update model loading code
+text_encoder = LlamaModel.from_pretrained(convert_model_path(Config.DEFAULT_TEXT_ENCODER), subfolder='text_encoder', torch_dtype=torch.float16).cpu()
+text_encoder_2 = CLIPTextModel.from_pretrained(convert_model_path(Config.DEFAULT_TEXT_ENCODER_2), subfolder='text_encoder_2', torch_dtype=torch.float16).cpu()
+tokenizer = LlamaTokenizerFast.from_pretrained(convert_model_path(Config.DEFAULT_TOKENIZER), subfolder='tokenizer')
+tokenizer_2 = CLIPTokenizer.from_pretrained(convert_model_path(Config.DEFAULT_TOKENIZER_2), subfolder='tokenizer_2')
+vae = AutoencoderKLHunyuanVideo.from_pretrained(convert_model_path(Config.DEFAULT_VAE), subfolder='vae', torch_dtype=torch.float16).cpu()
 
-transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained('lllyasviel/FramePackI2V_HY', torch_dtype=torch.bfloat16).cpu()
+feature_extractor = SiglipImageProcessor.from_pretrained(convert_model_path(Config.DEFAULT_FEATURE_EXTRACTOR), subfolder='feature_extractor')
+image_encoder = SiglipVisionModel.from_pretrained(convert_model_path(Config.DEFAULT_IMAGE_ENCODER), subfolder='image_encoder', torch_dtype=torch.float16).cpu()
+
+transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained(convert_model_path(Config.DEFAULT_TRANSFORMER), torch_dtype=torch.bfloat16).cpu()
 
 vae.eval()
 text_encoder.eval()
@@ -1047,8 +1230,6 @@ else:
 
 stream = AsyncStream()
 
-
-
 def clean_up_temp_mp4png(job):
     job_name = job.job_name
     """
@@ -1086,7 +1267,7 @@ def clean_up_temp_mp4png(job):
     # regex to grab the trailing number
     pattern = re.compile(rf'^{re.escape(job_name)}_(\d+)\.mp4$')
     candidates = []
-
+    #
     # scan directory
     for fname in os.listdir(outputs_folder):
         m = pattern.match(fname)
@@ -1122,57 +1303,71 @@ def clean_up_temp_mp4png(job):
 
 def mark_job_processing(job):
     """Mark a job as processing and update its thumbnail"""
-    try:
-        job.status = "processing"
-        
-        # Delete existing thumbnail if it exists
-        if job.thumbnail and os.path.exists(job.thumbnail):
-            os.remove(job.thumbnail)
-        
-        # For text-to-video jobs, create a new processing thumbnail
-        if job.image_path == "text2video":
-            job.thumbnail = create_thumbnail(job, status_change=True)
-        else:
-            # For image-based jobs, update the existing thumbnail
-            job.thumbnail = create_thumbnail(job, status_change=True)
-        
-        # Move job to top of queue
-        if job in job_queue:
-            job_queue.remove(job)
-            job_queue.insert(0, job)
-            
-        save_queue()
-        return update_queue_table(), update_queue_display()
-    except Exception as e:
-        alert_print(f"Error marking job as processing: {str(e)}")
-        traceback.print_exc()
-        return gr.update(), gr.update()
+    job.status = "processing"
+    
+    # Delete existing thumbnail if it exists
+    if job.thumbnail and os.path.exists(job.thumbnail):
+        os.remove(job.thumbnail)
 
-def mark_job_completed(job):
-    """Mark a job as completed and update its thumbnail"""
-    try:
-        job.status = "completed"
+    job.thumbnail = create_thumbnail(job, status_change=True)
+
+    
+    # Move job to top of queue
+    if job in job_queue:
+        job_queue.remove(job)
+        job_queue.insert(0, job)
         
+    save_queue()
+    return update_queue_table(), update_queue_display()
+
+
+def mark_job_completed(completed_job):
+    """Mark a job as completed and update its thumbnail"""
+    completed_job.status = "completed"
+    # Move completed_job to the top of completed jobs
+    if completed_job in job_queue:
+        job_queue.remove(completed_job)
+        # Find the first completed job
+        insert_index = len(job_queue)
+        for i, existing_job in enumerate(job_queue):
+            if existing_job.status == "completed":
+                insert_index = i
+                break
+        job_queue.insert(insert_index, completed_job)
+    
+    if completed_job.image_path == "text2video":
+        #  code to Just update the overlay of the text2video completed_job.thumbnail 
+        debug_print(f"in mark_job_completed {completed_job.job_name} is a completed {completed_job.image_path} job so we just add a text overlay")
+        mp4_path = os.path.join(outputs_folder, f"{completed_job.job_name}.mp4")
+        extract_thumb_from_processing_mp4(completed_job, mp4_path)
+        img = Image.open(completed_job.thumbnail)
+        width, height = img.size
+        new_height = 200
+        new_width = int((new_height / height) * width)
+        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        # Create a new image with padding
+        new_img = Image.new('RGB', (200, 200), color='black')
+        new_img.paste(img, ((200 - img.width) // 2, (200 - img.height) // 2))
+        # Add status text if provided
+        status_overlay = "DONE"
+        draw = ImageDraw.Draw(new_img)
+        draw.text((100, 100), status_overlay, fill='yellow', anchor="mm", font=font)           
+            # Save thumbnail
+        thumbnail_path = os.path.join(temp_queue_images, f"thumb_{completed_job.job_name}.png")
+        new_img.save(thumbnail_path)
+        debug_print(f"thumbnail saved {thumbnail_path}")
+        completed_job.thumbnail = thumbnail_path
+        save_queue()
+    else:
         # Delete existing thumbnail if it exists
-        if job.thumbnail and os.path.exists(job.thumbnail):
-            os.remove(job.thumbnail)
+        if completed_job.thumbnail and os.path.exists(completed_job.thumbnail):
+            os.remove(completed_job.thumbnail)
         
         # Create new thumbnail with completed status
-        if job.image_path:
-            job.thumbnail = create_thumbnail(job, status_change=True)
-        
-        # Move job to bottom of queue
-        if job in job_queue:
-            job_queue.remove(job)
-            job_queue.append(job)
-            save_queue()
-            
-        return update_queue_table(), update_queue_display()
-            
-    except Exception as e:
-        alert_print(f"Error marking job as completed: {str(e)}")
-        traceback.print_exc()
-        return gr.update(), gr.update()
+        if os.path.exists(completed_job.image_path):
+            completed_job.thumbnail = create_thumbnail(completed_job, status_change=True)
+    save_queue()
+    return update_queue_table(), update_queue_display()
 
 def mark_job_failed(job):
     """Mark a job as failed and update its thumbnail"""
@@ -1191,8 +1386,8 @@ def mark_job_failed(job):
         if job in job_queue:
             job_queue.remove(job)
             job_queue.insert(0, job)
-            save_queue()
             
+        save_queue()
         return update_queue_table(), update_queue_display()
             
     except Exception as e:
@@ -1213,8 +1408,8 @@ def mark_job_pending(job):
         if job.image_path:
             job.thumbnail = create_thumbnail(job, status_change=True)
             
+        save_queue()
         return update_queue_table(), update_queue_display()
-            
     except Exception as e:
         alert_print(f"Error marking job as pending: {str(e)}")
         traceback.print_exc()
@@ -1227,12 +1422,11 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
 
     total_latent_sections = (video_length * 30) / (latent_window_size * 4)
     total_latent_sections = int(max(round(total_latent_sections), 1))
-
-    job_failed = None
-    job_id = generate_timestamp() #not used
-
+    # job_failed = None not used yet
+    # job_id = generate_timestamp() #not used yet
     stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...'))))
-            # Save the input image with metadata
+
+    # Save the input image with metadata
     metadata = PngInfo()
     metadata.add_text("prompt", prompt)
     metadata.add_text("n_prompt", n_prompt) 
@@ -1246,9 +1440,6 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
     metadata.add_text("gpu_memory_preservation", str(gpu_memory_preservation))
     metadata.add_text("use_teacache", str(use_teacache))
     metadata.add_text("mp4_crf", str(mp4_crf))
-
-
-
 
     try:
         # Clean GPU
@@ -1286,7 +1477,6 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
             default_resolution = 640  # Default resolution for text-to-video
             input_image_np = np.zeros((default_resolution, default_resolution, 3), dtype=np.uint8)
             height = width = default_resolution
-            # Skip saving the blank image since it's not needed for text-to-video
         else:
             # Handle image-to-video case
             input_image_np = np.array(input_image)
@@ -1331,39 +1521,19 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Start sampling ...'))))
 
         rnd = torch.Generator("cpu").manual_seed(seed)
-        num_frames = latent_window_size * 4 - 3
 
-        history_latents = torch.zeros(size=(1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32).cpu()
+        # Initialize history latents with improved structure
+        history_latents = torch.zeros(size=(1, 16, 16 + 2 + 1, height // 8, width // 8), dtype=torch.float32).cpu()
         history_pixels = None
-        total_generated_latent_frames = 0
+        history_latents = torch.cat([history_latents, start_latent.to(history_latents)], dim=2)
+        total_generated_latent_frames = 1
 
-        latent_paddings = reversed(range(total_latent_sections))
-
-        if total_latent_sections > 4:
-            # In theory the latent_paddings should follow the above sequence, but it seems that duplicating some
-            # items looks better than expanding it when total_latent_sections > 4
-            # One can try to remove below trick and just
-            # use `latent_paddings = list(reversed(range(total_latent_sections)))` to compare
-            latent_paddings = [3] + [2] * (total_latent_sections - 3) + [1, 0]
-
-        for latent_padding in latent_paddings:
-            is_last_section = latent_padding == 0
-            latent_padding_size = latent_padding * latent_window_size
-
+        for section_index in range(total_latent_sections):
             if stream.input_queue.top() == 'end':
                 stream.output_queue.push(('end', None))
                 return
 
-            print(f'latent_padding_size = {latent_padding_size}, is_last_section = {is_last_section}')
-
-            indices = torch.arange(0, sum([1, latent_padding_size, latent_window_size, 1, 2, 16])).unsqueeze(0)
-            clean_latent_indices_pre, blank_indices, latent_indices, clean_latent_indices_post, clean_latent_2x_indices, clean_latent_4x_indices = indices.split([1, latent_padding_size, latent_window_size, 1, 2, 16], dim=1)
-            clean_latent_indices = torch.cat([clean_latent_indices_pre, clean_latent_indices_post], dim=1)
-
-            clean_latents_pre = start_latent.to(history_latents)
-            clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, :1 + 2 + 16, :, :].split([1, 2, 16], dim=2)
-            clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
-
+            print(f'section_index = {section_index}, total_latent_sections = {total_latent_sections}')
             if not high_vram:
                 unload_complete_models()
                 move_model_to_device_with_memory_preservation(transformer, target_device=gpu, preserved_memory_gb=gpu_memory_preservation)
@@ -1372,6 +1542,7 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
                 transformer.initialize_teacache(enable_teacache=True, num_steps=steps)
             else:
                 transformer.initialize_teacache(enable_teacache=False)
+
 
             def callback(d):
                 preview = d['denoised']
@@ -1389,20 +1560,40 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
                 hint = f'Sampling {current_step}/{steps}'
                 current_time = max(0, (total_generated_latent_frames * 4 - 3) / 30)
                 percent_done = (current_time / video_length) * 100
-                desc = f'Current Job {job_name} video is being created now and is {percent_done:.1f}% done, Total generated frames: {int(max(0, total_generated_latent_frames * 4 - 3))}, Video length: {current_time:.2f} seconds of {video_length} at (FPS-30). '
-                stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
+                job_type = "Image2video" if next_job and next_job.image_path != "text2video" else "text2video"
+                desc = f'Current {job_type} Job {job_name} is being created now and is {percent_done:.1f}% done, Total generated frames: {int(max(0, total_generated_latent_frames * 4 - 3))}, Video length: {current_time:.2f} seconds of {video_length} at (FPS-30). '
+                progress_html = f'''
+<div>
+  <h3 style="margin-bottom: 10px;">
+    Current Step is {hint} it is {percentage:.0f}% finished with its Progress creating the video segment.
+  </h3>
+  <div style="margin-bottom: 20px;">
+    {make_progress_bar_html(percentage, hint)}
+  </div>
+  <h3 style="margin-bottom: 10px;">
+    Current Job Progress {percent_done:.0f}% – so far {current_time:.2f} seconds of the {video_length} second Video job has been created.
+  </h3>
+  {make_progress_bar_html(percent_done, f'Job Progress: {percent_done:.0f}%')}
+</div>'''
+
+                stream.output_queue.push(('progress', (preview, desc, progress_html)))
                 return
+            indices = torch.arange(0, sum([1, 16, 2, 1, latent_window_size])).unsqueeze(0)
+            clean_latent_indices_start, clean_latent_4x_indices, clean_latent_2x_indices, clean_latent_1x_indices, latent_indices = indices.split([1, 16, 2, 1, latent_window_size], dim=1)
+            clean_latent_indices = torch.cat([clean_latent_indices_start, clean_latent_1x_indices], dim=1)
+
+            clean_latents_4x, clean_latents_2x, clean_latents_1x = history_latents[:, :, -sum([16, 2, 1]):, :, :].split([16, 2, 1], dim=2)
+            clean_latents = torch.cat([start_latent.to(history_latents), clean_latents_1x], dim=2)
 
             generated_latents = sample_hunyuan(
                 transformer=transformer,
                 sampler='unipc',
                 width=width,
                 height=height,
-                frames=num_frames,
+                frames=latent_window_size * 4 - 3,
                 real_guidance_scale=cfg,
                 distilled_guidance_scale=gs,
                 guidance_rescale=rs,
-                # shift=3.0,
                 num_inference_steps=steps,
                 generator=rnd,
                 prompt_embeds=llama_vec,
@@ -1424,100 +1615,105 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
                 callback=callback,
             )
 
-            if is_last_section:
-                generated_latents = torch.cat([start_latent.to(generated_latents), generated_latents], dim=2)
-
             total_generated_latent_frames += int(generated_latents.shape[2])
-            history_latents = torch.cat([generated_latents.to(history_latents), history_latents], dim=2)
+            history_latents = torch.cat([history_latents, generated_latents.to(history_latents)], dim=2)
 
             if not high_vram:
                 offload_model_from_device_for_memory_preservation(transformer, target_device=gpu, preserved_memory_gb=8)
                 load_model_as_complete(vae, target_device=gpu)
 
-            real_history_latents = history_latents[:, :, :total_generated_latent_frames, :, :]
+            real_history_latents = history_latents[:, :, -total_generated_latent_frames:, :, :]
 
             if history_pixels is None:
                 history_pixels = vae_decode(real_history_latents, vae).cpu()
             else:
-                section_latent_frames = (latent_window_size * 2 + 1) if is_last_section else (latent_window_size * 2)
+                section_latent_frames = latent_window_size * 2
                 overlapped_frames = latent_window_size * 4 - 3
 
-                current_pixels = vae_decode(real_history_latents[:, :, :section_latent_frames], vae).cpu()
-                history_pixels = soft_append_bcthw(current_pixels, history_pixels, overlapped_frames)
+                current_pixels = vae_decode(real_history_latents[:, :, -section_latent_frames:], vae).cpu()
+                history_pixels = soft_append_bcthw(history_pixels, current_pixels, overlapped_frames)
 
             if not high_vram:
                 unload_complete_models()
 
             output_filename = os.path.join(outputs_folder, f'{job_name}_{total_generated_latent_frames}.mp4')
-
             save_bcthw_as_mp4(history_pixels, output_filename, fps=30, crf=mp4_crf)
 
             print(f'Decoded. Current latent shape {real_history_latents.shape}; pixel shape {history_pixels.shape}')
-
-            # Find the job that's currently being processed
-
             stream.output_queue.push(('file', output_filename))
 
-            if is_last_section:
-                break
+
     except:
         traceback.print_exc()
-
+        
         if not high_vram:
             unload_complete_models(
                 text_encoder, text_encoder_2, image_encoder, vae, transformer
             )
-    debug_print(f"last section Calling clean_up_temp_mp4png")
-    clean_up_temp_mp4png(next_job)
 
+    completed_job = next_job
+    stream.output_queue.push(('end', completed_job))
 
-    if next_job.image_path == "text2video":
-        mp4_path = os.path.join(outputs_folder, f'{next_job.job_name}.mp4')
-        if os.path.exists(mp4_path):
-            import cv2
+def extract_thumb_from_processing_mp4(next_job, output_filename):
+    mp4_path = output_filename
+    status_overlay = "RUNNING" if next_job.status=="processing" else "DONE" if next_job.status=="completed" else next_job.status.upper()
 
-            cap = cv2.VideoCapture(mp4_path)
-            # Seek to the 30th frame (zero-based index 29)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 29)
-            ret, frame = cap.read()
-            if ret:
-                # Resize to 200×200
-                thumb = cv2.resize(frame, (200, 200), interpolation=cv2.INTER_AREA)
+    if os.path.exists(mp4_path):
+        import cv2
 
-                # Overlay centered yellow "DONE" text
-                text = "DONE"
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                scale = 1
-                thickness = 2
-                color = (0, 255, 255)  # BGR for yellow
+        cap = cv2.VideoCapture(mp4_path)
+        # Seek to the 10th frame (zero-based index 9)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 9)
+        ret, frame = cap.read()
+        if ret:
+            # target thumbnail size
+            THUMB_SIZE = 200
 
-                # Calculate text size to center it
-                (text_w, text_h), _ = cv2.getTextSize(text, font, scale, thickness)
-                x = (thumb.shape[1] - text_w) // 2
-                y = (thumb.shape[0] + text_h) // 2
+            # get frame dims
+            h, w = frame.shape[:2]
 
-                cv2.putText(
-                    thumb,
-                    text,
-                    (x, y),
-                    font,
-                    scale,
-                    color,
-                    thickness,
-                    cv2.LINE_AA
-                )
+            # scale so that the larger dimension becomes THUMB_SIZE
+            scale = THUMB_SIZE / max(w, h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
 
-                thumb_path = os.path.join(temp_queue_images, f'thumb_{next_job.job_name}.png')
-                queue_path = os.path.join(temp_queue_images, f'queue_image_{next_job.job_name}.png')
-                cv2.imwrite(thumb_path, thumb)
-                # cv2.imwrite(queue_path, thumb)
-                next_job.thumbnail = thumb_path
+            # resize the frame
+            resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
-            cap.release()
+            # create black background and center the resized frame
+            thumb = np.zeros((THUMB_SIZE, THUMB_SIZE, 3), dtype=np.uint8)
+            x_off = (THUMB_SIZE - new_w) // 2
+            y_off = (THUMB_SIZE - new_h) // 2
+            thumb[y_off : y_off + new_h, x_off : x_off + new_w] = resized
 
-    mark_job_completed(next_job)
-    stream.output_queue.push(('end', None))
+            # Overlay centered yellow status text
+            text = (f"{status_overlay}")
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            scale = 1
+            thickness = 2
+            color = (0, 255, 255)  # BGR for yellow
+
+            # Calculate text size to center it
+            (text_w, text_h), _ = cv2.getTextSize(text, font, scale, thickness)
+            x = (thumb.shape[1] - text_w) // 2
+            y = (thumb.shape[0] + text_h) // 2
+
+            cv2.putText(
+                thumb,
+                text,
+                (x, y),
+                font,
+                scale,
+                color,
+                thickness,
+                cv2.LINE_AA
+            )
+
+            thumb_path = os.path.join(temp_queue_images, f'thumb_{next_job.job_name}.png')
+            cv2.imwrite(thumb_path, thumb)
+        cap.release()
     return
+
 
 
 def process(input_image, prompt, n_prompt, seed, video_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
@@ -1550,11 +1746,8 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
     if pending_jobs:
         # Process first pending job
         next_job = pending_jobs[0]
-
-        
-        mark_job_processing(next_job)
-        save_queue()
         queue_table_update, queue_display_update = mark_job_processing(next_job)
+        save_queue()
         job_name = next_job.job_name
         
         # Handle NULL image path (text-to-video)
@@ -1614,7 +1807,6 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
     stream = AsyncStream()
     debug_print(f"Starting worker for job {next_job.job_name}")
 
-
     # Save job parameters to JSON if enabled
     if process_keep_temp_json:
         job_params = {
@@ -1635,8 +1827,6 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
         with open(json_path, 'w') as f:
             json.dump(job_params, f, indent=2)
 
-
-
     async_run(worker, process_image, process_prompt, process_n_prompt, seed, process_job_name, 
              process_length, latent_window_size, process_steps, 
              process_cfg, process_gs, process_rs, 
@@ -1644,15 +1834,15 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
 
     # Initial yield with updated queue display and button states
     yield (
-        None,  # result_video
-        None,  # preview_image
-        '',    # progress_desc
-        '',    # progress_bar
+        gr.update(interactive=True),   # queue_button (always enabled)
         gr.update(interactive=False),  # start_button
         gr.update(interactive=True),   # end_button
-        gr.update(interactive=True),   # queue_button (always enabled)
-        update_queue_table(),         # queue_table
-        update_queue_display()        # queue_display
+        gr.update(visible=True),       # preview_image
+        None,                          # result_video
+        '',    # progress_desc
+        '',    # progress_bar
+        update_queue_display(),        # queue_display
+        update_queue_table()           # queue_table
     )
 
     # Process output queue
@@ -1663,254 +1853,153 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
             if flag == 'file':
                 output_filename = data
                 yield (
-                    output_filename,  # result_video
-                    gr.update(),  # preview_image
-                    gr.update(),  # progress_desc
-                    gr.update(),  # progress_bar
+                    gr.update(interactive=True),   # queue_button (always enabled)
                     gr.update(interactive=False),  # start_button
                     gr.update(interactive=True),   # end_button
-                    gr.update(interactive=True),   # queue_button (always enabled)
-                    update_queue_table(),         # queue_table
-                    update_queue_display()        # queue_display
+                    gr.update(visible=False),  # preview_image (hide when showing video)
+                    output_filename,  # result_video (show the actual video)
+                    desc,  # progress_desc
+                    html,  # progress_bar
+                    update_queue_display(),        # queue_display
+                    update_queue_table()         # queue_table
                 )
 
             if flag == 'progress':
                 preview, desc, html = data
                 yield (
-                    gr.update(),  # result_video
-                    gr.update(visible=True, value=preview),  # preview_image
-                    desc,  # progress_desc
-                    html,  # progress_bar
+                    gr.update(interactive=True),   # queue_button (always enabled)
                     gr.update(interactive=False),  # start_button
                     gr.update(interactive=True),   # end_button
-                    gr.update(interactive=True),   # queue_button (always enabled)
-                    update_queue_table(),         # queue_table
-                    update_queue_display()        # queue_display
+                    gr.update(visible=True, value=preview),  # preview_image
+                    None,  # result_video (don't update during progress)
+                    desc,  # progress_desc
+                    html,  # progress_bar
+                    update_queue_display(),        # queue_display
+                    update_queue_table()         # queue_table
                 )
 
             if flag == 'end':
-                # Find the current processing job
-                for job in job_queue:
-                    if job.status == "processing":
-                        queue_table_update, queue_display_update = mark_job_completed(job)
-                        save_queue()
-                        update_queue_table()
-                        update_queue_display()
+                completed_job = data
+                
+                if stream.input_queue.top() == 'end':
+                    aborted_job = next((job for job in job_queue if job.status == "processing"), None)
+                    clean_up_temp_mp4png(aborted_job)
+                    mp4_path = os.path.join(outputs_folder, f"{aborted_job.job_name}.mp4")
+                    extract_thumb_from_processing_mp4(aborted_job, mp4_path)
+                    mark_job_pending(aborted_job)
+                    save_queue  
 
-                # Check if we should continue processing (only if end button wasn't clicked)
-                if not stream.input_queue.top() == 'end':
-                    # Find next pending job
-                    next_job = None
-                    pending_jobs = [job for job in job_queue if job.status.lower() == "pending"]
-                    if pending_jobs:
-                        next_job = pending_jobs[0]
-                    if next_job:
-                       
+                    return update_queue_table(), update_queue_display()   
 
-                            
-                        mark_job_processing(next_job)
-                        queue_table_update, queue_display_update = mark_job_processing(next_job)
-                        save_queue()
-                        update_queue_table()
-                        update_queue_display()
-                        save_queue()
-                        
-                        # Handle NULL image path (text-to-video)
-                        if next_job.image_path == "text2video":
-                            next_image = None
-                        else:
-                            try:
-                                next_image = np.array(Image.open(next_job.image_path))
-                            except Exception as e:
-                                alert_print(f"ERROR loading image: {str(e)}")
-                                traceback.print_exc()
-                                raise
+                clean_up_temp_mp4png(completed_job)
+                mp4_path = os.path.join(outputs_folder, f"{completed_job.job_name}.mp4")
+                extract_thumb_from_processing_mp4(completed_job, mp4_path)
+                mark_job_completed(completed_job)
+                save_queue  
 
-                        # Use job parameters with defaults if missing
-                        next_prompt = next_job.prompt if hasattr(next_job, 'prompt') else prompt
-                        next_n_prompt = next_job.n_prompt if hasattr(next_job, 'n_prompt') else n_prompt
-                        next_seed = next_job.seed if hasattr(next_job, 'seed') else seed
-                        debug_print(f"Job {next_job.job_name} initial seed value: {process_seed}")
-                        if next_seed == -1:
-                            seed = random.randint(0, 2**32 - 1)
-                            debug_print(f"Generated new random seed for job {next_job.job_name}: {seed}")
-                            save_queue()
-
-                        next_job_name = next_job.job_name
-                        next_length = next_job.video_length if hasattr(next_job, 'video_length') else video_length
-                        next_steps = next_job.steps if hasattr(next_job, 'steps') else steps
-                        next_cfg = next_job.cfg if hasattr(next_job, 'cfg') else cfg
-                        next_gs = next_job.gs if hasattr(next_job, 'gs') else gs
-                        next_rs = next_job.rs if hasattr(next_job, 'rs') else rs
-                        next_gpu_memory_preservation = next_job.gpu_memory_preservation if hasattr(next_job, 'gpu_memory_preservation') else gpu_memory_preservation
-                        next_teacache = next_job.use_teacache if hasattr(next_job, 'use_teacache') else use_teacache
-                        next_keep_temp_png = next_job.keep_temp_png if hasattr(next_job, 'keep_temp_png') else keep_temp_png
-                        next_keep_temp_mp4 = next_job.keep_temp_mp4 if hasattr(next_job, 'keep_temp_mp4') else keep_temp_mp4
-                        next_keep_temp_json = next_job.keep_temp_json if hasattr(next_job, 'keep_temp_json') else keep_temp_json
-                        next_mp4_crf = next_job.mp4_crf if hasattr(next_job, 'mp4_crf') else mp4_crf
-                        
-                        # Start processing next job
-                        stream = AsyncStream()
-                            # Save job parameters to JSON if enabled
-                        if next_keep_temp_json:
-                            job_params = {
-                                'prompt': next_prompt,
-                                'negative_prompt': next_n_prompt,
-                                'seed': seed,
-                                'job_name': next_job_name,
-                                'length': next_length,
-                                'steps': next_steps,
-                                'cfg': next_cfg,
-                                'gs': next_gs,
-                                'rs': next_rs,
-                                'gpu_memory_preservation': next_gpu_memory_preservation,
-                                'use_teacache': next_teacache,
-                                'mp4_crf': next_mp4_crf,
-                            }
-                            json_path = os.path.join(job_history_folder, f'{next_job_name}.json')
-                            with open(json_path, 'w') as f:
-                                json.dump(job_params, f, indent=2)
-                        debug_print(f"Starting worker for job {next_job.job_name}")
-                        async_run(worker, next_image, next_prompt, next_n_prompt, seed, next_job_name,
-                                next_length, latent_window_size, next_steps,
-                                next_cfg, next_gs, next_rs,
-                                next_gpu_memory_preservation, next_teacache, next_mp4_crf,
-                                next_keep_temp_png, next_keep_temp_mp4, next_keep_temp_json, next_job)
+                next_job = None
+                pending_jobs = [job for job in job_queue if job.status.lower() == "pending"]
+                if pending_jobs:
+                    next_job = pending_jobs[0]
+                if next_job:
+                    debug_print(f"now marking next job {next_job.job_name} as processing and preparing to send to worker")    
+                    queue_table_update, queue_display_update = mark_job_processing(next_job)
+                    save_queue()
+                    # Handle NULL image path (text-to-video)
+                    debug_print("if the next job is text to video you shoulkd see a gren print line next")
+                    if next_job.image_path == "text2video":
+                        next_image = None
                     else:
-                        debug_print("No more pending jobs to process")
-                        yield (
-                            None,  # result_video
-                            None,  # preview_image
-                            "No pending jobs to process",  # progress_desc
-                            '',    # progress_bar
-                            gr.update(interactive=True),   # "Add to Queue" button
-                            gr.update(interactive=False),  # "Start Queued Jobs" button
-                            gr.update(interactive=True),   # "Abort Generation" button
-                            update_queue_table(),         # queue_table
-                            update_queue_display()        # queue_display
-                        )
-                        return
+                        debug_print("this line should only appear if the job is NOT text2vdieo")
+                        next_image = np.array(Image.open(next_job.image_path))
+                        
+                    # Use job parameters with defaults if missing
+                    next_prompt = next_job.prompt if hasattr(next_job, 'prompt') else prompt
+                    next_n_prompt = next_job.n_prompt if hasattr(next_job, 'n_prompt') else n_prompt
+                    next_seed = next_job.seed if hasattr(next_job, 'seed') else seed
+                    debug_print(f"Job {next_job.job_name} initial seed value: {process_seed}")
+                    if next_seed == -1:
+                        seed = random.randint(0, 2**32 - 1)
+                        debug_print(f"Generated new random seed for job {next_job.job_name}: {seed}")
+                        save_queue()
+
+                    next_job_name = next_job.job_name
+                    next_length = next_job.video_length if hasattr(next_job, 'video_length') else video_length
+                    next_steps = next_job.steps if hasattr(next_job, 'steps') else steps
+                    next_cfg = next_job.cfg if hasattr(next_job, 'cfg') else cfg
+                    next_gs = next_job.gs if hasattr(next_job, 'gs') else gs
+                    next_rs = next_job.rs if hasattr(next_job, 'rs') else rs
+                    next_gpu_memory_preservation = next_job.gpu_memory_preservation if hasattr(next_job, 'gpu_memory_preservation') else gpu_memory_preservation
+                    next_teacache = next_job.use_teacache if hasattr(next_job, 'use_teacache') else use_teacache
+                    next_keep_temp_png = next_job.keep_temp_png if hasattr(next_job, 'keep_temp_png') else keep_temp_png
+                    next_keep_temp_mp4 = next_job.keep_temp_mp4 if hasattr(next_job, 'keep_temp_mp4') else keep_temp_mp4
+                    next_keep_temp_json = next_job.keep_temp_json if hasattr(next_job, 'keep_temp_json') else keep_temp_json
+                    next_mp4_crf = next_job.mp4_crf if hasattr(next_job, 'mp4_crf') else mp4_crf
+                    
+                    # Start processing next job
+                    stream = AsyncStream()
+                    # Save job parameters to JSON if enabled
+                    if next_keep_temp_json:
+                        job_params = {
+                            'prompt': next_prompt,
+                            'negative_prompt': next_n_prompt,
+                            'seed': seed,
+                            'job_name': next_job_name,
+                            'length': next_length,
+                            'steps': next_steps,
+                            'cfg': next_cfg,
+                            'gs': next_gs,
+                            'rs': next_rs,
+                            'gpu_memory_preservation': next_gpu_memory_preservation,
+                            'use_teacache': next_teacache,
+                            'mp4_crf': next_mp4_crf,
+                        }
+                        json_path = os.path.join(job_history_folder, f'{next_job_name}.json')
+                        with open(json_path, 'w') as f:
+                            json.dump(job_params, f, indent=2)
+                    debug_print(f"Starting worker for job {next_job.job_name}")
+                    async_run(worker, next_image, next_prompt, next_n_prompt, seed, next_job_name,
+                            next_length, latent_window_size, next_steps,
+                            next_cfg, next_gs, next_rs,
+                            next_gpu_memory_preservation, next_teacache, next_mp4_crf,
+                            next_keep_temp_png, next_keep_temp_mp4, next_keep_temp_json, next_job)
+
                 else:
-                    debug_print("End button clicked, stopping processing")
+                    debug_print("No more pending jobs to process")
                     yield (
-                        None,  # result_video
+                        gr.update(interactive=True),   # queue_button (always enabled)
+                        gr.update(interactive=True),   # start_button
+                        gr.update(interactive=False),  # end_button
                         None,  # preview_image
-                        "Processing stopped",  # progress_desc
+                        None,  # result_video
+                        "No pending jobs to process",  # progress_desc
                         '',    # progress_bar
-                        gr.update(interactive=True),   # "Add to Queue" button
-                        gr.update(interactive=False),  # "Start Queued Jobs" button
-                        gr.update(interactive=True),   # "Abort Generation" button
-                        update_queue_table(),         # queue_table
-                        update_queue_display()        # queue_display
+                        update_queue_display(),        # queue_display
+                        update_queue_table()         # queue_table
                     )
-                    return
+                    # active_stream = None  # Initialize active_stream as None
+                    return update_queue_table(), update_queue_display()  
 
         except Exception as e:
             alert_print(f"Error in process loop: {str(e)}")
             traceback.print_exc()
             yield (
-                None,  # result_video
+                gr.update(interactive=True),   # queue_button (always enabled)
+                gr.update(interactive=True),   # start_button
+                gr.update(interactive=False),  # end_button
                 None,  # preview_image
+                None,  # result_video
                 f"Error: {str(e)}",  # progress_desc
                 '',    # progress_bar
-                gr.update(interactive=True),   # "Add to Queue" button
-                gr.update(interactive=False),  # "Start Queued Jobs" button
-                gr.update(interactive=True),   # "Abort Generation" button
-                update_queue_table(),         # queue_table
-                update_queue_display()        # queue_display
+                update_queue_display(),        # queue_display
+                update_queue_table()         # queue_table
             )
-            return
-
+            # active_stream = None  # Initialize active_stream as None
+            return update_queue_table(), update_queue_display()  
+    # active_stream = None  # Initialize active_stream as None
 def end_process():
     """Handle end generation button click - stop all processes and change all processing jobs to pending jobs"""
-    try:
-        # First send the end signal to stop all processes
-        stream.input_queue.push('end')
-
-        
-        # Find and update all processing jobs
-        jobs_changed = 0
-        processing_job = None
-        # job_queue[:] = [job for job in job_queue if job.status != "completed"]
-
-        # First find the processing job
-        for job in job_queue:
-            if job.status == "processing":
-                processing_job = job
-                break
-        
-            if processing_job.image_path == "text2video":
-                mp4_path = os.path.join(outputs_folder, f'{processing_job.job_name}.mp4')
-                if os.path.exists(mp4_path):
-                    import cv2
-
-                    cap = cv2.VideoCapture(mp4_path)
-                    # Seek to the 30th frame (zero-based index 29)
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 29)
-                    ret, frame = cap.read()
-                    if ret:
-                        # Resize to 200×200
-                        thumb = cv2.resize(frame, (200, 200), interpolation=cv2.INTER_AREA)
-                        text = ""
-                        font = cv2.FONT_HERSHEY_SIMPLEX
-                        scale = 1
-                        thickness = 2
-                        color = (0, 255, 255)  # BGR for yellow
-
-                        # Calculate text size to center it
-                        (text_w, text_h), _ = cv2.getTextSize(text, font, scale, thickness)
-                        x = (thumb.shape[1] - text_w) // 2
-                        y = (thumb.shape[0] + text_h) // 2
-
-                        cv2.putText(
-                            thumb,
-                            text,
-                            (x, y),
-                            font,
-                            scale,
-                            color,
-                            thickness,
-                            cv2.LINE_AA
-                        )
-
-                        thumb_path = os.path.join(temp_queue_images, f'thumb_{processing_job.job_name}.png')
-                        queue_path = os.path.join(temp_queue_images, f'queue_image_{processing_job.job_name}.png')
-                        cv2.imwrite(thumb_path, thumb)
-                        # cv2.imwrite(queue_path, thumb)
-                        processing_job.thumbnail = thumb_path
-
-                    cap.release()
-
-
-            # this is done with the queue_table_update mark_job_pending(processing_job) 
-            save_queue()
-            queue_table_update, queue_display_update = mark_job_pending(processing_job) 
-            jobs_changed += 1
-        
-            # If we found a processing job, move it to the top
-            if processing_job:
-                job_queue.remove(processing_job)
-                job_queue.insert(0, processing_job)
-        
-            save_queue()
-            return (
-                update_queue_table(),         # queue_table
-                update_queue_display(),       # queue_display
-                gr.update(interactive=True),  # start_button
-                gr.update(interactive=False), # end_button
-                gr.update(interactive=True)   # queue_button (always enabled)
-            )
-    except Exception as e:
-        alert_print(f"Error in end_process: {str(e)}")
-        traceback.print_exc()
-        return (
-            gr.update(),                  # queue_table
-            gr.update(),                  # queue_display
-            gr.update(interactive=True),  # start_button
-            gr.update(interactive=False), # end_button
-            gr.update(interactive=True)   # queue_button (always enabled)
-        )
-
+    stream.input_queue.push('end')
 def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_name, use_teacache, gpu_memory_preservation, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_mp4, keep_temp_json):
     """Handle adding a new job to the queue"""
     try:
@@ -2015,12 +2104,10 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
                 save_queue()  # Save after changing statuses
 
         return update_queue_table(), update_queue_display(), gr.update(interactive=True)  # queue_button (always enabled)
-
     except Exception as e:
         alert_print(f"Error in add_to_queue_handler: {str(e)}")
         traceback.print_exc()
         return update_queue_table(), update_queue_display(), gr.update(interactive=True)  # queue_button (always enabled)
-
 
 def delete_all_jobs():
     """Delete all jobs from the queue and their associated files"""
@@ -2143,12 +2230,21 @@ def move_job(job_name, direction):
                 new_index -= 1
             if new_index < 0:
                 return update_queue_table(), update_queue_display()
+            
+            # Don't allow moving above processing jobs
+            if job.status == "pending" and job_queue[new_index].status == "processing":
+                return update_queue_table(), update_queue_display()
+                
         else:  # direction == 'down'
             # Find the next non-completed job
             new_index = current_index + 1
             while new_index < len(job_queue) and job_queue[new_index].status == "completed":
                 new_index += 1
             if new_index >= len(job_queue):
+                return update_queue_table(), update_queue_display()
+            
+            # Don't allow moving below completed jobs
+            if job.status == "pending" and job_queue[new_index].status == "completed":
                 return update_queue_table(), update_queue_display()
         
         # Remove from current position and insert at new position
@@ -2345,100 +2441,59 @@ css = make_progress_bar_css() + """
     background-color: #666 !important;
     border-radius: 4px !important;
 }
-.queue-gallery .gallery-item {
-    margin: 5px;
+.input-gallery,
+.queue-gallery {
+    max-height: 600px !important;
+    overflow-y: auto !important;
+    padding: 10px;
+}
+.input-gallery > div,
+.queue-gallery > div {
+    height: 100% !important;
+    overflow-y: auto !important;
+}
+.input-gallery .gallery-container,
+.queue-gallery .gallery-container {
+    max-height: 600px !important;
+    overflow-y: auto !important;
+    padding: 10px;
 }
 
-/* Hide table headers */
+/* Hide DataFrame headers (remove column numbers) */
 .gradio-dataframe thead {
     display: none !important;
 }
 
-/* Prevent Gradio's wrapper from centering the grid */
-.gradio-dataframe > div {
-    display: flex !important;
-    align-items: flex-start !important;
-}
-
-/* Force AG-Grid to fill its container */
-.ag-theme-gradio .ag-root-wrapper {
-    height: 100% !important;
-}
-.ag-theme-gradio .ag-body-viewport,
-.ag-theme-gradio .ag-center-cols-viewport {
-    height: 100% !important;
-}
-
-/* Set each row to 100px tall */
-.ag-theme-gradio .ag-body-viewport .ag-center-cols-container .ag-row {
-    height: 100px !important;
-}
-
-/* Vertically center the prompt text in column 7 */
-.ag-theme-gradio .ag-center-cols-container .ag-row .ag-cell:nth-child(7) {
-    display: flex !important;
-    align-items: center !important;
-    padding: 0 8px !important;
-}
-
-/* First column fixed width */
-.gradio-dataframe th:first-child,
-.gradio-dataframe td:first-child {
-    width: 150px !important;
-    min-width: 150px !important;
-}
-
-/* Remove orange selection highlight */
-.gradio-dataframe td.selected,
-.gradio-dataframe td:focus,
-.gradio-dataframe tr.selected td,
-.gradio-dataframe tr:focus td {
-    background-color: transparent !important;
-    outline: none !important;
-    box-shadow: none !important;
-}
-
-/* Style the arrow buttons */
-.gradio-dataframe td:nth-child(2),
-.gradio-dataframe td:nth-child(3),
-.gradio-dataframe td:nth-child(4),
-.gradio-dataframe td:nth-child(5),
-.gradio-dataframe td:nth-child(6),
+/* Fix widths for action columns */
 .gradio-dataframe th:nth-child(2),
+.gradio-dataframe td:nth-child(2),
 .gradio-dataframe th:nth-child(3),
+.gradio-dataframe td:nth-child(3),
 .gradio-dataframe th:nth-child(4),
+.gradio-dataframe td:nth-child(4),
 .gradio-dataframe th:nth-child(5),
-.gradio-dataframe th:nth-child(6) {
-    cursor: pointer;
-    color: #666;
-    font-weight: bold;
-    transition: color 0.2s;
+.gradio-dataframe td:nth-child(5),
+.gradio-dataframe th:nth-child(6),
+.gradio-dataframe td:nth-child(6) {
     width: 42px !important;
     min-width: 42px !important;
     max-width: 42px !important;
     text-align: center !important;
-    # vertical-align: middle !important;
-    # font-size: 1.5em !important;
     padding: 0 !important;
-    # overflow: visible !important;
-}
-.gradio-dataframe td:nth-child(2):hover,
-.gradio-dataframe td:nth-child(3):hover,
-.gradio-dataframe td:nth-child(4):hover,
-.gradio-dataframe td:nth-child(5):hover,
-.gradio-dataframe td:nth-child(6):hover {
-    color: #000;
 }
 
-/* Align all headers */
-.gradio-dataframe th {
-    text-align: center !important;
-    padding: 8px !important;
+/* Fix width for prompt column */
+.gradio-dataframe th:last-child,
+.gradio-dataframe td:last-child {
+    width: 300px !important;
+    min-width: 200px !important;
+    max-width: 400px !important;
+    text-align: left !important;
+    white-space: normal !important;
+    word-break: break-word !important;
 }
-.output-html:last-of-type, .gradio-html:last-of-type, .gradio-html-block:last-of-type {
-    display: none !important;
-}
-/* Column‐width overrides */
+
+/* Restore DataFrame child column widths for prompt and others */
 .gradio-dataframe th:nth-child(7) { width:  80px !important; min-width:  80px !important; }
 .gradio-dataframe th:nth-child(8) { width:  60px !important; min-width:  60px !important; }
 .gradio-dataframe th:nth-child(9) { width: 300px !important; min-width: 300px !important; text-align: left !important; }
@@ -2472,9 +2527,19 @@ def edit_job(job_name, new_prompt, new_n_prompt, new_video_length, new_seed, new
                 job.keep_temp_mp4 = new_keep_temp_mp4
                 job.keep_temp_json = new_keep_temp_json
                 
-                # If job was completed, change to pending and mark it
+                # If job was completed, change to pending and move it
                 if job.status == "completed":
                     job.status = "pending"
+                    # Remove from current position
+                    job_queue.remove(job)
+                    # Find the first completed job
+                    insert_index = len(job_queue)
+                    for i, existing_job in enumerate(job_queue):
+                        if existing_job.status == "completed":
+                            insert_index = i
+                            break
+                    # Insert at the found index
+                    job_queue.insert(insert_index, job)
                     mark_job_pending(job)
                 
                 # Save changes
@@ -2517,8 +2582,6 @@ def hide_edit_window():
     """Hide the edit window without saving changes"""
     return gr.update(visible=False)
 
-
-
 block = gr.Blocks(css=css).queue()
 
 with block:
@@ -2529,10 +2592,15 @@ with block:
             with gr.Row():
                 with gr.Column():
                     input_image = gr.Gallery(
-                        label="Image",
-                        height=320,
-                        columns=3,
-                        object_fit="contain"
+                        label="Image (adding multiple images will create a jobs for each, leaving image blank will be prompt Text 2 Video",
+                        height=500,
+                        columns=4,
+                        object_fit="contain",
+                        elem_classes=["input-gallery"],
+                        show_label=True,
+                        allow_preview=False,  # Disable built-in preview
+                        show_download_button=False,
+                        container=True
                     )
                     prompt = gr.Textbox(label="Prompt", value='')
                     n_prompt = gr.Textbox(label="Negative Prompt", value="", visible=True)
@@ -2573,7 +2641,7 @@ with block:
                     
                     preview_image = gr.Image(label="Next Latents", height=200, visible=False)
                     result_video = gr.Video(label="Finished Frames", autoplay=True, show_share_button=False, height=512, loop=True)
-                    gr.Markdown('Note that the ending actions will be generated before the starting actions due to the inverted sampling. If the starting action is not in the video, you just need to wait, and it will be generated later.')
+                    gr.Markdown('Note: text Placeholder.')
                     progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
                     progress_bar = gr.HTML('', elem_classes='no-generating-animation')
 
@@ -2581,7 +2649,7 @@ with block:
                     queue_display = gr.Gallery(
                         label="Job Queue Gallery",
                         show_label=True,
-                        columns=3,
+                        columns=5,
                         object_fit="contain",
                         elem_classes=["queue-gallery"],
                         allow_preview=True,
@@ -2605,8 +2673,19 @@ with block:
                     edit_group = gr.Group(visible=False)  # Hidden by default
                     with edit_group:
                         with gr.Row():
-                            save_edit_button = gr.Button("Save Changes")
-                            cancel_edit_button = gr.Button("Cancel changes")
+                            with gr.Column(scale=1):
+                                save_edit_button = gr.Button("Save Changes")
+                            with gr.Column(scale=1):
+                                dummy_label = gr.HTML(
+                                    '''
+                                    <div style="text-align:center; font-weight:bold;">
+                                        Editing Job<br>
+                                        <span style="font-weight:normal;">Please Click Save or Cancel</span>
+                                    </div>
+                                    '''
+                                )
+                            with gr.Column(scale=1):
+                                cancel_edit_button = gr.Button("Cancel changes")
                         edit_prompt = gr.Textbox(label="Edit Prompt")
                         edit_n_prompt = gr.Textbox(label="Edit Negative Prompt")
                         edit_video_length = gr.Slider(label="Edit Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
@@ -2628,7 +2707,8 @@ with block:
                 value=[],
                 interactive=False,
                 visible=True,
-                elem_classes=["gradio-dataframe"]
+                elem_classes=["gradio-dataframe"],
+                # Optionally, set max_rows or height if available in your Gradio version
             )
 
 
@@ -2638,6 +2718,9 @@ with block:
                     with gr.Row():
                         with gr.Column():
                             gr.Markdown("### this will set the new job defaults, REQUIRES RESTART, these changes will not change setting for jobs that are already in the queue")
+                            with gr.Row():
+                                save_defaults_button = gr.Button("Save job settings as Defaults")
+                                restore_defaults_button = gr.Button("Restore Original job settings")
                             settings_use_teacache = gr.Checkbox(label='Use TeaCache', value=Config.DEFAULT_USE_TEACACHE)
                             settings_seed = gr.Number(label="Seed", value=Config.DEFAULT_SEED, precision=0)
                             settings_video_length = gr.Slider(label="Total Video Length (Seconds)", minimum=1, maximum=120, value=Config.DEFAULT_VIDEO_LENGTH, step=0.1)
@@ -2650,66 +2733,133 @@ with block:
                             settings_keep_temp_png = gr.Checkbox(label="Keep temp PNG", value=Config.DEFAULT_KEEP_TEMP_PNG)
                             settings_keep_temp_mp4 = gr.Checkbox(label="Keep temp MP4", value=Config.DEFAULT_KEEP_TEMP_MP4)
                             settings_keep_temp_json = gr.Checkbox(label="Keep temp JSON", value=Config.DEFAULT_KEEP_TEMP_JSON)
-                            
-                            with gr.Row():
-                                save_defaults_button = gr.Button("Save job settings as Defaults")
-                                restore_defaults_button = gr.Button("Restore Original job settings")
+
 
                 with gr.Tab("Global System Defaults"):
                     with gr.Row():
                         with gr.Column():
                             gr.Markdown("### this will set the new system defaults, it REQUIRES RESTART to take")
-                            settings_outputs_folder = gr.Textbox(label="Outputs Folder", value=Config.OUTPUTS_FOLDER)
-                            settings_job_history_folder = gr.Textbox(label="Job History Folder this is where the job settings json file and job input image is stored", value=Config.JOB_HISTORY_FOLDER)
-                            settings_debug_mode = gr.Checkbox(label="Debug Mode", value=Config.DEBUG_MODE)
-                            settings_keep_completed = gr.Checkbox(label="Keep Completed Jobs", value=Config.KEEP_COMPLETED)
-                            
                             with gr.Row():
                                 save_settings_button = gr.Button("Save Settings")
                                 restore_defaults_button = gr.Button("Restore Defaults")
-                            
                             settings_status = gr.Markdown()
                             
+                            settings_outputs_folder = gr.Textbox(label="Outputs Folder", value=Config.OUTPUTS_FOLDER)
+                            settings_job_history_folder = gr.Textbox(label="Job History Folder this is where the job settings json file and job input image is stored", value=Config.JOB_HISTORY_FOLDER)
+                            settings_debug_mode = gr.Checkbox(label="Debug Mode", value=Config.DEBUG_MODE)
+                            settings_keep_completed_jobs = gr.Checkbox(label="Keep Completed Jobs", value=Config.KEEP_COMPLETED_JOBS)
+                            
+                            gr.Markdown("### Model Selection")
+                            available_models = get_available_models()
+                            settings_model_name = gr.Dropdown(
+                                label="Default Model",
+                                choices=available_models['transformer'],
+                                value=Config.DEFAULT_MODEL_NAME
+                            )
+                            settings_text_encoder = gr.Dropdown(
+                                label="Text Encoder",
+                                choices=available_models['text_encoder'],
+                                value=Config.DEFAULT_TEXT_ENCODER
+                            )
+                            settings_text_encoder_2 = gr.Dropdown(
+                                label="Text Encoder 2",
+                                choices=available_models['text_encoder_2'],
+                                value=Config.DEFAULT_TEXT_ENCODER_2
+                            )
+                            settings_tokenizer = gr.Dropdown(
+                                label="Tokenizer",
+                                choices=available_models['tokenizer'],
+                                value=Config.DEFAULT_TOKENIZER
+                            )
+                            settings_tokenizer_2 = gr.Dropdown(
+                                label="Tokenizer 2",
+                                choices=available_models['tokenizer_2'],
+                                value=Config.DEFAULT_TOKENIZER_2
+                            )
+                            settings_vae = gr.Dropdown(
+                                label="VAE",
+                                choices=available_models['vae'],
+                                value=Config.DEFAULT_VAE
+                            )
+                            settings_feature_extractor = gr.Dropdown(
+                                label="Feature Extractor",
+                                choices=available_models['feature_extractor'],
+                                value=Config.DEFAULT_FEATURE_EXTRACTOR
+                            )
+                            settings_image_encoder = gr.Dropdown(
+                                label="Image Encoder",
+                                choices=available_models['image_encoder'],
+                                value=Config.DEFAULT_IMAGE_ENCODER
+                            )
+                            settings_transformer = gr.Dropdown(
+                                label="Transformer",
+                                choices=available_models['transformer'],
+                                value=Config.DEFAULT_TRANSFORMER
+                            )
+                            
+                            # Settings event handlers
                             save_settings_button.click(
-                                fn=save_system_settings_from_ui,
+                                fn=save_settings_from_ui,
                                 inputs=[
                                     settings_outputs_folder,
                                     settings_job_history_folder,
                                     settings_debug_mode,
-                                    settings_keep_completed
+                                    settings_keep_completed_jobs,
+                                    settings_model_name,
+                                    settings_text_encoder,
+                                    settings_text_encoder_2,
+                                    settings_tokenizer,
+                                    settings_tokenizer_2,
+                                    settings_vae,
+                                    settings_feature_extractor,
+                                    settings_image_encoder,
+                                    settings_transformer
                                 ],
                                 outputs=[settings_status]
                             )
                             
                             restore_defaults_button.click(
-                                fn=restore_system_defaults,
-                                inputs=[
+                                fn=lambda: restore_original_defaults(return_ips_defaults=False),
+                                inputs=[],
+                                outputs=[
                                     settings_outputs_folder,
                                     settings_job_history_folder,
                                     settings_debug_mode,
-                                    settings_keep_completed
-                                ],
-                                outputs=[settings_status]
+                                    settings_keep_completed_jobs,
+                                    settings_model_name,
+                                    settings_text_encoder,
+                                    settings_text_encoder_2,
+                                    settings_tokenizer,
+                                    settings_tokenizer_2,
+                                    settings_vae,
+                                    settings_feature_extractor,
+                                    settings_image_encoder,
+                                    settings_transformer
+                                ]
                             )
 
     # Connect settings buttons and all other UI event bindings at the top level (not in a nested with block)
     save_defaults_button.click(
-        fn=save_settings_from_ui,
+        fn=save_ips_defaults_from_ui,
         inputs=[
             settings_use_teacache, settings_seed, settings_video_length, settings_steps,
             settings_cfg, settings_gs, settings_rs, settings_gpu_memory, settings_mp4_crf,
-            settings_keep_temp_png, settings_keep_temp_mp4, settings_keep_temp_json
+            settings_keep_temp_png, settings_keep_temp_mp4, settings_keep_temp_json,
+            settings_model_name, settings_text_encoder, settings_text_encoder_2, settings_tokenizer, settings_tokenizer_2,
+            settings_vae, settings_feature_extractor, settings_image_encoder, settings_transformer
         ],
         outputs=[gr.Markdown()]
     )
 
     restore_defaults_button.click(
-        fn=restore_original_defaults,
+        fn=lambda: restore_original_defaults(return_ips_defaults=True),
         inputs=[],
         outputs=[
             settings_use_teacache, settings_seed, settings_video_length, settings_steps,
             settings_cfg, settings_gs, settings_rs, settings_gpu_memory, settings_mp4_crf,
-            settings_keep_temp_png, settings_keep_temp_mp4, settings_keep_temp_json
+            settings_keep_temp_png, settings_keep_temp_mp4, settings_keep_temp_json,
+            settings_model_name, settings_text_encoder, settings_text_encoder_2, settings_tokenizer, settings_tokenizer_2,
+            settings_vae, settings_feature_extractor, settings_image_encoder, settings_transformer
         ]
     )
 
@@ -2844,7 +2994,17 @@ with block:
     start_button.click(
         fn=process, 
         inputs=ips, 
-        outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, queue_button, queue_table, queue_display]
+        outputs=[
+            queue_button,    # queue_button (always enabled)
+            start_button,    # start_button
+            end_button,      # end_button
+            preview_image,   # preview_image
+            result_video,    # result_video
+            progress_desc,   # progress_desc
+            progress_bar,    # progress_bar
+            queue_display,   # queue_display
+            queue_table      # queue_table
+        ]
     )
     end_button.click(
         fn=end_process,
@@ -2872,3 +3032,137 @@ block.launch(
 
 # iface = gr.Interface(fn=greet, inputs="text", outputs="text")
 # iface.launch(share=True)
+
+# Removed scroll-to-bottom button code
+
+gr.HTML(
+    """
+    <script>
+    function resizeGradioAGGrid() {
+        // Find all AG-Grid instances and resize columns to fit
+        document.querySelectorAll('.ag-root').forEach(function(grid) {
+            if (grid && grid.__agComponent) {
+                try {
+                    grid.__agComponent.gridOptions.api.sizeColumnsToFit();
+                } catch (e) {}
+            }
+        });
+    }
+    window.addEventListener('resize', resizeGradioAGGrid);
+    // Also trigger once on load
+    setTimeout(resizeGradioAGGrid, 1000);
+    </script>
+    """
+)
+
+def create_default_settings():
+    """Create default settings.ini file"""
+    config = configparser.ConfigParser()
+    config['IPS Defaults'] = {}
+    config['Model Settings'] = {}
+    config['System Defaults'] = {}
+    save_settings(config)
+
+def create_settings_tab():
+    """Create the settings tab with all configuration options"""
+    with gr.Tab("Settings"):
+        with gr.Tab("Global System Defaults"):
+            outputs_folder = gr.Textbox(label="Outputs Folder", value=Config.OUTPUTS_FOLDER)
+            job_history_folder = gr.Textbox(label="Job History Folder", value=Config.JOB_HISTORY_FOLDER)
+            debug_mode = gr.Checkbox(label="Debug Mode", value=Config.DEBUG_MODE)
+            keep_completed_jobs = gr.Checkbox(label="Keep Completed Jobs", value=Config.KEEP_COMPLETED_JOBS)
+            
+            # Model selection dropdowns
+            available_models = get_available_models()
+            model_name = gr.Dropdown(label="Default Model", choices=available_models['transformer'], value=Config.DEFAULT_MODEL_NAME)
+            text_encoder = gr.Dropdown(label="Text Encoder", choices=available_models['text_encoder'], value=Config.DEFAULT_TEXT_ENCODER)
+            text_encoder_2 = gr.Dropdown(label="Text Encoder 2", choices=available_models['text_encoder_2'], value=Config.DEFAULT_TEXT_ENCODER_2)
+            tokenizer = gr.Dropdown(label="Tokenizer", choices=available_models['tokenizer'], value=Config.DEFAULT_TOKENIZER)
+            tokenizer_2 = gr.Dropdown(label="Tokenizer 2", choices=available_models['tokenizer_2'], value=Config.DEFAULT_TOKENIZER_2)
+            vae = gr.Dropdown(label="VAE", choices=available_models['vae'], value=Config.DEFAULT_VAE)
+            feature_extractor = gr.Dropdown(label="Feature Extractor", choices=available_models['feature_extractor'], value=Config.DEFAULT_FEATURE_EXTRACTOR)
+            image_encoder = gr.Dropdown(label="Image Encoder", choices=available_models['image_encoder'], value=Config.DEFAULT_IMAGE_ENCODER)
+            transformer = gr.Dropdown(label="Transformer", choices=available_models['transformer'], value=Config.DEFAULT_TRANSFORMER)
+            
+            save_settings_button = gr.Button("Save Settings")
+            restore_defaults_button = gr.Button("Restore Defaults")
+            settings_status = gr.Textbox(label="Status", interactive=False)
+            
+            save_settings_button.click(
+                fn=save_settings_from_ui,
+                inputs=[
+                    outputs_folder, job_history_folder, debug_mode, keep_completed_jobs,
+                    model_name, text_encoder, text_encoder_2, tokenizer, tokenizer_2,
+                    vae, feature_extractor, image_encoder, transformer
+                ],
+                outputs=[settings_status]
+            )
+            
+            restore_defaults_button.click(
+                fn=lambda: restore_original_defaults(return_ips_defaults=False),
+                inputs=[],
+                outputs=[
+                    outputs_folder, job_history_folder, debug_mode, keep_completed_jobs,
+                    model_name, text_encoder, text_encoder_2, tokenizer, tokenizer_2,
+                    vae, feature_extractor, image_encoder, transformer
+                ]
+            )
+
+def save_ips_defaults_from_ui(use_teacache, seed, video_length, steps, cfg, gs, rs, gpu_memory, mp4_crf,
+                           keep_temp_png, keep_temp_mp4, keep_temp_json,
+                           model_name, text_encoder, text_encoder_2, tokenizer, tokenizer_2,
+                           vae, feature_extractor, image_encoder, transformer):
+    """Save IPS defaults from UI settings"""
+    config = load_settings()
+    if 'IPS Defaults' not in config:
+        config['IPS Defaults'] = {}
+    section = config['IPS Defaults']
+    
+    # Save IPS defaults
+    section['DEFAULT_USE_TEACACHE'] = repr(use_teacache)
+    section['DEFAULT_SEED'] = repr(seed)
+    section['DEFAULT_VIDEO_LENGTH'] = repr(video_length)
+    section['DEFAULT_STEPS'] = repr(steps)
+    section['DEFAULT_CFG'] = repr(cfg)
+    section['DEFAULT_GS'] = repr(gs)
+    section['DEFAULT_RS'] = repr(rs)
+    section['DEFAULT_GPU_MEMORY'] = repr(gpu_memory)
+    section['DEFAULT_MP4_CRF'] = repr(mp4_crf)
+    section['DEFAULT_KEEP_TEMP_PNG'] = repr(keep_temp_png)
+    section['DEFAULT_KEEP_TEMP_MP4'] = repr(keep_temp_mp4)
+    section['DEFAULT_KEEP_TEMP_JSON'] = repr(keep_temp_json)
+    
+    # Save model settings
+    if 'Model Settings' not in config:
+        config['Model Settings'] = {}
+    section = config['Model Settings']
+    section['DEFAULT_MODEL_NAME'] = repr(model_name)
+    section['DEFAULT_TEXT_ENCODER'] = repr(text_encoder)
+    section['DEFAULT_TEXT_ENCODER_2'] = repr(text_encoder_2)
+    section['DEFAULT_TOKENIZER'] = repr(tokenizer)
+    section['DEFAULT_TOKENIZER_2'] = repr(tokenizer_2)
+    section['DEFAULT_VAE'] = repr(vae)
+    section['DEFAULT_FEATURE_EXTRACTOR'] = repr(feature_extractor)
+    section['DEFAULT_IMAGE_ENCODER'] = repr(image_encoder)
+    section['DEFAULT_TRANSFORMER'] = repr(transformer)
+    
+    save_settings(config)
+    return "Settings saved successfully!"
+
+def restore_ips_defaults():
+    """Restore IPS defaults to original values"""
+    config = load_settings()
+    if 'IPS Defaults' not in config:
+        config['IPS Defaults'] = {}
+    section = config['IPS Defaults']
+    
+    # Restore IPS defaults
+    defaults = Config.get_original_defaults()
+    for key, value in defaults.items():
+        if key.startswith('DEFAULT_'):
+            section[key] = repr(value)
+    
+    save_settings(config)
+    return "IPS defaults restored successfully!"
+
+# End of file
