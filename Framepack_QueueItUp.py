@@ -766,7 +766,13 @@ def add_to_queue(prompt, n_prompt, input_image, video_length, seed, use_teacache
                 keep_temp_mp4=keep_temp_mp4,
                 keep_temp_json=keep_temp_json
             )
-            job_queue.append(job)
+            # Find the first completed job
+            insert_index = len(job_queue)
+            for i, existing_job in enumerate(job_queue):
+                if existing_job.status == "completed":
+                    insert_index = i
+                    break
+            job_queue.insert(insert_index, job)
             job.thumbnail = create_thumbnail(job, status_change=True)  
             save_queue()
             debug_print(f"Total jobs in the queue:{len(job_queue)}")
@@ -798,8 +804,14 @@ def add_to_queue(prompt, n_prompt, input_image, video_length, seed, use_teacache
                 keep_temp_mp4=keep_temp_mp4,
                 keep_temp_json=keep_temp_json
             )
+            # Find the first completed job
+            insert_index = len(job_queue)
+            for i, existing_job in enumerate(job_queue):
+                if existing_job.status == "completed":
+                    insert_index = i
+                    break
+            job_queue.insert(insert_index, job)
             job.thumbnail = create_thumbnail(job, status_change=False)
-            job_queue.append(job)
             save_queue()
             debug_print(f"Total jobs in the queue:{len(job_queue)}")
             return job_name
@@ -825,7 +837,21 @@ def create_thumbnail(job, status_change=False):
     status_overlay = "RUNNING" if job.status == "processing" else ("DONE" if job.status == "completed" else job.status.upper())
     
     try:
-       # Handle text-to-video case (job.image_path is text2video) this is being done twice
+        # Try to load arial font, fall back to default if not available
+        try:
+            font = ImageFont.truetype("arial.ttf", 16)
+            small_font = ImageFont.truetype("arial.ttf", 12)
+        except (OSError, IOError):
+            try:
+                # DejaVuSans ships with Pillow and is usually available
+                font = ImageFont.truetype("DejaVuSans.ttf", 16)
+                small_font = ImageFont.truetype("DejaVuSans.ttf", 12)
+            except (OSError, IOError):
+                # Final fallback to a simple built-in bitmap font
+                font = ImageFont.load_default()
+                small_font = ImageFont.load_default()
+
+        # Handle text-to-video case (job.image_path is text2video)
         if job.image_path == "text2video":
             debug_print(f"in create_thumbnail {job.job_name} has a job.image_path that is {job.image_path}")
             if not job.thumbnail or status_change:  # Create new thumbnail if none exists or status changed
@@ -855,6 +881,7 @@ def create_thumbnail(job, status_change=False):
                 # Save thumbnail
                 thumbnail_path = os.path.join(temp_queue_images, f"thumb_{job.job_name}.png")
                 img.save(thumbnail_path)
+                debug_print(f"thumbnail saved {thumbnail_path}")
                 job.thumbnail = thumbnail_path
                 save_queue()
             return job.thumbnail
@@ -862,7 +889,7 @@ def create_thumbnail(job, status_change=False):
         # Handle missing image-based cases 
         if job.image_path != "text2video" and not os.path.exists(job.image_path) and not job.thumbnail:
             # Create missing image thumbnail
-            img = Image.new('RGB', (200, 200), color='white')
+            img = Image.new('RGB', (200, 200), color='black')
             draw = ImageDraw.Draw(img)
             
             # Calculate text position for "MISSING IMAGE"
@@ -871,6 +898,9 @@ def create_thumbnail(job, status_change=False):
             x = (200 - (text_bbox[2] - text_bbox[0])) // 2
             y = (200 - (text_bbox[3] - text_bbox[1])) // 2
             
+            # Add black outline to make text more readable
+            for offset in [(-1,-1), (-1,1), (1,-1), (1,1)]:
+                draw.text((x+offset[0], y+offset[1]), text, font=font, fill=(0,0,0))
             draw.text((x, y), text, fill='red', font=font)
             
             # Save thumbnail
@@ -897,6 +927,10 @@ def create_thumbnail(job, status_change=False):
                 text_bbox = draw.textbbox((0, 0), status_overlay, font=font)
                 x = (200 - (text_bbox[2] - text_bbox[0])) // 2
                 y = (200 - (text_bbox[3] - text_bbox[1])) // 2
+                
+                # Add black outline to make text more readable
+                for offset in [(-1,-1), (-1,1), (1,-1), (1,1)]:
+                    draw.text((x+offset[0], y+offset[1]), status_overlay, font=font, fill=(0,0,0))
                 draw.text((x, y), status_overlay, fill=status_color, font=font)
             
             # Save thumbnail
@@ -1340,24 +1374,24 @@ def mark_job_completed(completed_job):
         debug_print(f"in mark_job_completed {completed_job.job_name} is a completed {completed_job.image_path} job so we just add a text overlay")
         mp4_path = os.path.join(outputs_folder, f"{completed_job.job_name}.mp4")
         extract_thumb_from_processing_mp4(completed_job, mp4_path)
-        img = Image.open(completed_job.thumbnail)
-        width, height = img.size
-        new_height = 200
-        new_width = int((new_height / height) * width)
-        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        # Create a new image with padding
-        new_img = Image.new('RGB', (200, 200), color='black')
-        new_img.paste(img, ((200 - img.width) // 2, (200 - img.height) // 2))
-        # Add status text if provided
-        status_overlay = "DONE"
-        draw = ImageDraw.Draw(new_img)
-        draw.text((100, 100), status_overlay, fill='yellow', anchor="mm", font=font)           
-            # Save thumbnail
-        thumbnail_path = os.path.join(temp_queue_images, f"thumb_{completed_job.job_name}.png")
-        new_img.save(thumbnail_path)
-        debug_print(f"thumbnail saved {thumbnail_path}")
-        completed_job.thumbnail = thumbnail_path
-        save_queue()
+        # img = Image.open(completed_job.thumbnail)
+        # width, height = img.size
+        # new_height = 200
+        # new_width = int((new_height / height) * width)
+        # img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        # # Create a new image with padding
+        # new_img = Image.new('RGB', (200, 200), color='black')
+        # new_img.paste(img, ((200 - img.width) // 2, (200 - img.height) // 2))
+        # # Add status text if provided
+        # status_overlay = "DONE"
+        # draw = ImageDraw.Draw(new_img)
+        # draw.text((100, 100), status_overlay, fill='yellow', anchor="mm", font=font)           
+            # # Save thumbnail
+        # thumbnail_path = os.path.join(temp_queue_images, f"thumb_{completed_job.job_name}.png")
+        # new_img.save(thumbnail_path)
+        # debug_print(f"thumbnail saved {thumbnail_path}")
+        # completed_job.thumbnail = thumbnail_path
+        # save_queue()
     else:
         # Delete existing thumbnail if it exists
         if completed_job.thumbnail and os.path.exists(completed_job.thumbnail):
@@ -1660,6 +1694,12 @@ def worker(input_image, prompt, n_prompt, seed, job_name, video_length, latent_w
 def extract_thumb_from_processing_mp4(next_job, output_filename):
     mp4_path = output_filename
     status_overlay = "RUNNING" if next_job.status=="processing" else "DONE" if next_job.status=="completed" else next_job.status.upper()
+    status_color = {
+        "pending": (0, 255, 255),  # BGR for yellow
+        "processing": (255, 0, 0),  # BGR for blue
+        "completed": (0, 255, 0),   # BGR for green
+        "failed": (0, 0, 255)       # BGR for red
+    }.get(next_job.status, (255, 255, 255))  # BGR for white
 
     if os.path.exists(mp4_path):
         import cv2
@@ -1689,25 +1729,37 @@ def extract_thumb_from_processing_mp4(next_job, output_filename):
             y_off = (THUMB_SIZE - new_h) // 2
             thumb[y_off : y_off + new_h, x_off : x_off + new_w] = resized
 
-            # Overlay centered yellow status text
+            # Overlay centered status text
             text = (f"{status_overlay}")
             font = cv2.FONT_HERSHEY_SIMPLEX
             scale = 1
             thickness = 2
-            color = (0, 255, 255)  # BGR for yellow
 
             # Calculate text size to center it
             (text_w, text_h), _ = cv2.getTextSize(text, font, scale, thickness)
             x = (thumb.shape[1] - text_w) // 2
             y = (thumb.shape[0] + text_h) // 2
 
+            # Add a black outline to make text more readable
             cv2.putText(
                 thumb,
                 text,
                 (x, y),
                 font,
                 scale,
-                color,
+                (0, 0, 0),  # Black outline
+                thickness + 2,
+                cv2.LINE_AA
+            )
+
+            # Add the colored text
+            cv2.putText(
+                thumb,
+                text,
+                (x, y),
+                font,
+                scale,
+                status_color,
                 thickness,
                 cv2.LINE_AA
             )
@@ -1796,7 +1848,7 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
         yield (
             None,  # result_video
             None,  # preview_image
-            "No input image and no pending jobs to process",  # progress_desc
+            "no pending jobs to process",  # progress_desc
             '',    # progress_bar
             gr.update(interactive=True),   # start_button
             gr.update(interactive=False),  # end_button
@@ -1806,19 +1858,6 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
         )
         return
     
-    # Initial yield with updated queue display and button states
-    yield (
-        gr.update(interactive=True),   # queue_button (always enabled)
-        gr.update(interactive=False),  # start_button
-        gr.update(interactive=True),   # end_button
-        gr.update(visible=True),       # preview_image
-        None,                          # result_video
-        '',    # progress_desc
-        '',    # progress_bar
-        update_queue_display(),        # queue_display
-        update_queue_table()           # queue_table
-    )
-
     # Start processing
     stream = AsyncStream()
     debug_print(f"Starting worker for job {next_job.job_name}")
@@ -1848,7 +1887,19 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
              process_cfg, process_gs, process_rs, 
              process_gpu_memory_preservation, process_teacache, process_mp4_crf, process_keep_temp_png, process_keep_temp_mp4, process_keep_temp_json,next_job)
 
-    output_filename = None
+    # Initial yield with updated queue display and button states
+    yield (
+        gr.update(interactive=True),   # queue_button (always enabled)
+        gr.update(interactive=False),  # start_button
+        gr.update(interactive=True),   # end_button
+        gr.update(visible=True),       # preview_image
+        None,                          # result_video
+        '',    # progress_desc
+        '',    # progress_bar
+        update_queue_display(),        # queue_display
+        update_queue_table()           # queue_table
+    )
+
     # Process output queue
     while True:
         try:
@@ -1857,12 +1908,13 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
             if flag == 'file':
                 output_filename = data
                 extract_thumb_from_processing_mp4(next_job, output_filename)
+
                 yield (
                     gr.update(interactive=True),   # queue_button
                     gr.update(interactive=False),  # start_button
                     gr.update(interactive=True),   # end_button
                     gr.update(visible=False),      # preview_image
-                    output_filename,               # result_video (direct value)
+                    output_filename,               # result_video (direct value, not wrapped in gr.update)
                     gr.update(),                   # progress_desc
                     gr.update(),                   # progress_bar
                     update_queue_display(),        # queue_display
@@ -1871,6 +1923,7 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
 
             if flag == 'progress':
                 preview, desc, html = data
+
                 yield (
                     gr.update(interactive=True),   # queue_button
                     gr.update(interactive=False),  # start_button
@@ -1885,6 +1938,26 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
 
             if flag == 'end':
                 completed_job = data
+                if stream.input_queue.top() == 'end':
+                    aborted_job = next((job for job in job_queue if job.status == "processing"), None)
+                    clean_up_temp_mp4png(aborted_job)
+                    mp4_path = os.path.join(outputs_folder, f"{aborted_job.job_name}.mp4")
+                    extract_thumb_from_processing_mp4(aborted_job, mp4_path)
+                    queue_table_update, queue_display_update = mark_job_pending(aborted_job)
+                    save_queue
+                    yield (
+                        gr.update(interactive=True),   # queue_button
+                        gr.update(interactive=True),   # start_button
+                        gr.update(interactive=False),  # end_button
+                        gr.update(visible=False),  # preview_image
+                        None,  # result_video
+                        'JOB ABORTED',  # progress_desc
+                        '',  # progress_bar
+                        update_queue_display(),        # queue_display
+                        update_queue_table()         # queue_table
+                    )                    
+                    return 
+                    
                 yield (
                     gr.update(interactive=True),   # queue_button
                     gr.update(interactive=True),   # start_button
@@ -1896,17 +1969,6 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
                     update_queue_display(),        # queue_display
                     update_queue_table()         # queue_table
                 )
-
-                if stream.input_queue.top() == 'end':
-                    aborted_job = next((job for job in job_queue if job.status == "processing"), None)
-                    clean_up_temp_mp4png(aborted_job)
-                    mp4_path = os.path.join(outputs_folder, f"{aborted_job.job_name}.mp4")
-                    extract_thumb_from_processing_mp4(aborted_job, mp4_path)
-                    mark_job_pending(aborted_job)
-                    save_queue  
-
-                    return update_queue_table(), update_queue_display()   
-
                 clean_up_temp_mp4png(completed_job)
                 mp4_path = os.path.join(outputs_folder, f"{completed_job.job_name}.mp4")
                 extract_thumb_from_processing_mp4(completed_job, mp4_path)
@@ -1988,12 +2050,11 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
                         gr.update(interactive=False),  # end_button
                         None,  # preview_image
                         None,  # result_video
-                        "No pending jobs to process",  # progress_desc
+                        "No more pending jobs to process",  # progress_desc
                         '',    # progress_bar
                         update_queue_display(),        # queue_display
                         update_queue_table()         # queue_table
                     )
-                    # active_stream = None  # Initialize active_stream as None
                     return update_queue_table(), update_queue_display()  
 
         except Exception as e:
@@ -2010,9 +2071,7 @@ def process(input_image, prompt, n_prompt, seed, video_length, latent_window_siz
                 update_queue_display(),        # queue_display
                 update_queue_table()         # queue_table
             )
-            # active_stream = None  # Initialize active_stream as None
             return update_queue_table(), update_queue_display()  
-    # active_stream = None  # Initialize active_stream as None
 def end_process():
     """Handle end generation button click - stop all processes and change all processing jobs to pending jobs"""
     stream.input_queue.push('end')
@@ -2557,10 +2616,10 @@ def edit_job(job_name, new_prompt, new_n_prompt, new_video_length, new_seed, new
                     job.status = "pending"
                     # Remove from current position
                     job_queue.remove(job)
-                    # Find the first completed job
-                    insert_index = len(job_queue)
+                    # Find the first pending job position
+                    insert_index = 0
                     for i, existing_job in enumerate(job_queue):
-                        if existing_job.status == "completed":
+                        if existing_job.status == "pending":
                             insert_index = i
                             break
                     # Insert at the found index
