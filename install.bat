@@ -81,9 +81,9 @@ echo.
 echo ===== Setup Complete! =====
 echo To in the future use: python Framepack_QueueItUp.py --server 127.0.0.1 --inbrowser
 echo or use Framepack_QueueItUp.bat
-echo 
+echo ...
 echo press any key to start Framepack_QueueItUp
-echo 
+echo ...
 pause
 call Framepack_QueueItUp.bat
 pause
