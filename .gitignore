@@ -1,3 +1,4 @@
+
 hf_download/
 outputs/
 job_history/
@@ -162,7 +163,7 @@ venv.bak/
 dmypy.json
 
 # Pyre type checker
-.pyre/
+pyre/
 
 # pytype static type analyzer
 .pytype/
@@ -181,4 +182,3 @@ cython_debug/
 .ruff_cache/
 
 # PyPI configuration file
-.pypirc
