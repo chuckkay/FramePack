@@ -1,4 +1,5 @@
 # 🚂 QueueItUp for FramePack now With F1 Model
+CONDA INSTALL
 
 > A lightweight robust job-queue mod for lllyasviel’s FramePack WebUI
 > packed with great enhancements to Make framepack even better.
@@ -64,14 +65,14 @@
 
 ## 💾 Installation
 
-1. **Get FramePack WebUI**  
-   Follow lllyasviel’s official instructions to [install FramePack WebUI](https://github.com/lllyasviel/FramePack) and run `update.bat`.
+1. **install miniconda**  
 
-2. **Download QueueItUp**  
-   From this repo, grab:  
+2. **open a cmd prompt in the directory where you the installation to create QueueItUp_FramePack directory**  
+
    ```bash
-   Framepack_QueueItUp.bat
-   Framepack_QueueItUp.py
+   git clone -b dev https://github.com/chuckkay/QueueItUp_FramePack.git
+   cd QueueItUp_FramePack
+   install.bat
 
 ![Screenshot 2025-04-27 171659](https://github.com/user-attachments/assets/8e415ec0-4772-421f-b925-f9ff1d513c89)
 
