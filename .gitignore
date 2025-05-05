@@ -3,6 +3,8 @@ hf_download/
 outputs/
 job_history/
 temp_queue_images/
+things_to_do/
+oldversions/
 repo/
 job_queue.json
 quick_prompts.json
