@@ -8,12 +8,16 @@ NEW CONDA INSTALL Standalone Version
 ## 💾 Installation (creates Conda Enviornment
 
 1. **Install miniconda** https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe
-2. 
-3. **open a cmd prompt in the directory where you the installation to create QueueItUp_FramePack directory**  
+2. **open a cmd prompt in the directory where you the installation to create QueueItUp_FramePack directory**  
+3. enter these commands one at a time
 
    ```bash
    git clone -b dev https://github.com/chuckkay/QueueItUp_FramePack.git
+   
+   
    cd QueueItUp_FramePack
+   
+   
    install.bat
 
 
