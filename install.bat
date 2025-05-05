@@ -38,7 +38,7 @@ REM <-- “call” is required so control returns to this script
 call conda create -n "%ENV_NAME%" python=3.10.6 pip=25.0 -y
 
 echo.
-echo --- Conda env creation finished. Press any key to continue ---
+echo --- Conda env creation finished. Continue Installation press any key---
 pause
 
 REM 5) Activate the environment
@@ -55,6 +55,7 @@ REM 6) Install CUDA + cuDNN (log & pause)
 echo === Installing CUDA + cuDNN ===
 call conda install -n "%ENV_NAME%" conda-forge::cuda-runtime=12.6 conda-forge::cudnn=9.8.0.87 -y > install_cuda.log 2>&1
 echo log written to install_cuda.log
+echo Continue Installation---
 pause
 
 REM 7) Install PyTorch & friends
