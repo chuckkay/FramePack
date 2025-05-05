@@ -68,10 +68,10 @@
    Follow lllyasviel’s official instructions to [install FramePack WebUI](https://github.com/lllyasviel/FramePack) and run `update.bat`.
 
 2. **Download QueueItUp**  
-   From this repo, grab:  
-   ```bash
+   From these 2 files and pt in webui directory:  
    Framepack_QueueItUp.bat
    Framepack_QueueItUp.py
+   run Framepack_QueueItUp.bat
 
 ![Screenshot 2025-04-27 171659](https://github.com/user-attachments/assets/8e415ec0-4772-421f-b925-f9ff1d513c89)
 
