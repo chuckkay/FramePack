@@ -5,6 +5,20 @@
 
 ---
 
+## 💾 Installation
+
+1. **Get FramePack WebUI**  
+   Follow lllyasviel’s official instructions to [install FramePack WebUI](https://github.com/lllyasviel/FramePack) and run `update.bat`.
+
+2. **grab the drop in mod files**  
+   download these 2 files and put in webui directory:  
+   - Framepack_QueueItUp.bat
+   - Framepack_QueueItUp.py
+
+3. **run Framepack_QueueItUp.bat**  
+   enjoy !
+
+
 ## 🚀 New Features
 
 - **Sequential Queuing**  
@@ -62,16 +76,6 @@
 
 ---
 
-## 💾 Installation
-
-1. **Get FramePack WebUI**  
-   Follow lllyasviel’s official instructions to [install FramePack WebUI](https://github.com/lllyasviel/FramePack) and run `update.bat`.
-
-2. **Download QueueItUp**  
-   From these 2 files and pt in webui directory:  
-   Framepack_QueueItUp.bat
-   Framepack_QueueItUp.py
-   run Framepack_QueueItUp.bat
 
 ![Screenshot 2025-04-27 171659](https://github.com/user-attachments/assets/8e415ec0-4772-421f-b925-f9ff1d513c89)
 
@@ -81,7 +85,7 @@
 
 
 
-# FramePack
+# Original FramePack Readme
 <p align="center">
   <img src="https://github.com/user-attachments/assets/2cc030b4-87e1-40a0-b5bf-1b7d6b62820b" width="300" alt="Compact Quick-List Panel">
 </p>
