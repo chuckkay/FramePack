@@ -2289,7 +2289,10 @@ def worker(next_job):
                 current_time = max(0, (total_generated_latent_frames * 4 - 3) / 30)
                 job_percentage = int((current_time / worker_video_length) * 100)
                 job_type = "Image to Video" if next_job.image_path != "text2video" else "Text 2 Video"
-                job_desc = f'Creating a {job_type} video for job name {worker_job_name} , with these values seed: {worker_seed} cfg scale:{worker_gs} teacache:{worker_use_teacache} mp4_crf:{worker_mp4_crf} Created {current_time:.1f} second(s) of the {worker_video_length} second video - ({job_percentage}% complete), it will be saved in {worker_outputs_folder}{worker_job_name}.mp4'
+                job_desc = f"""Creating a {job_type} video for job name: {worker_job_name}<br>
+Settings: seed={worker_seed}, cfg scale={worker_gs}, teacache={worker_use_teacache}, mp4_crf={worker_mp4_crf}<br>
+Progress: {current_time:.1f} second(s) of {worker_video_length} second video ({job_percentage}% complete)<br>
+Output: {worker_outputs_folder}{worker_job_name}.mp4"""
                 job_progress = make_progress_bar_html(job_percentage, f'Job Progress: {job_percentage}%')
                 
                 
