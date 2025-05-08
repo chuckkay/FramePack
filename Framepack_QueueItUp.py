@@ -2289,7 +2289,8 @@ def worker(next_job):
                 current_time = max(0, (total_generated_latent_frames * 4 - 3) / 30)
                 job_percentage = int((current_time / worker_video_length) * 100)
                 job_type = "Image to Video" if next_job.image_path != "text2video" else "Text 2 Video"
-                job_desc = f"""Creating a {job_type} video for job name: {worker_job_name}<br>
+                job_desc = f"""Creating a {job_type} job for job name: {worker_job_name}<br>
+Prompt: = {worker_prompt}
 Settings: seed={worker_seed}, cfg scale={worker_gs}, teacache={worker_use_teacache}, mp4_crf={worker_mp4_crf}<br>
 Progress: {current_time:.1f} second(s) of {worker_video_length} second video ({job_percentage}% complete)<br>
 Output: {worker_outputs_folder}{worker_job_name}.mp4"""
@@ -2566,7 +2567,7 @@ def process():
                     aborted_job = next((job for job in job_queue if job.status == "processing"), None)
                     if aborted_job:
                         clean_up_temp_mp4png(aborted_job)
-                        alert_print(f"trying to save aborted job to outputs folder {aborted_job.outputs_folder}")
+                        debug_print(f"trying to save aborted job to outputs folder {aborted_job.outputs_folder}")
                         mp4_path = os.path.join(aborted_job.outputs_folder if hasattr(aborted_job, 'outputs_folder') else Config.OUTPUTS_FOLDER, f"{aborted_job.job_name}.mp4") 
                         extract_thumb_from_processing_mp4(aborted_job, mp4_path)
                         debug_print(f"aborted job video saved to outputs folder {aborted_job.outputs_folder}")
@@ -2619,16 +2620,14 @@ def process():
                         gr.update(interactive=False),     # start_button
                         gr.update(interactive=True),      # abort_button
                         None,          # preview_image
-                        None,            # result_video
-                        "",          #
-                        "",          #
-                        "",          #
-                        "",          #
-                        "",          #
+                        None,          # result_video
+                        "",          # progress_desc1
+                        "",          # progress_bar1
+                        "",          # progress_desc2
+                        "",          # progress_bar2
                         update_queue_display(),           # queue_display
                         update_queue_table()             # queue_table
-                        )
-                        
+                    )
 
                     debug_print(f"Starting worker for job {next_job.job_name}")
                     async_run(worker, next_job)
@@ -3135,7 +3134,7 @@ def copy_job(job_name):
         # Create thumbnail for the new job
         if new_image_path:
             new_job.thumbnail = create_thumbnail(new_job, status_change=True)
-       
+        mark_job_pending(new_job)
         # Save the updated queue
         save_queue()
         debug_print(f"Total jobs in the queue:{len(job_queue)}")
