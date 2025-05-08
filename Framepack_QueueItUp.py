@@ -3130,12 +3130,11 @@ def copy_job(job_name):
         
         # Insert the new job right after the original
         job_queue.insert(original_index + 1, new_job)
-        save_queue()
-        # Create thumbnail for the new job
         if new_image_path:
             new_job.thumbnail = create_thumbnail(new_job, status_change=True)
+
+
         mark_job_pending(new_job)
-        # Save the updated queue
         save_queue()
         debug_print(f"Total jobs in the queue:{len(job_queue)}")
         
