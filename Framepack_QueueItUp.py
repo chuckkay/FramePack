@@ -3029,8 +3029,11 @@ def handle_queue_action(evt: gr.SelectData):
     elif button_clicked == "❌":
         remove_job(job.job_name)
         return empty_values
+    elif button_clicked == "📋":
+        copy_job(job.job_name)
+        return empty_values
     
-    # Handle actions that need job values
+    # Handle edit action
     elif button_clicked == "✎":
         if job.status in ["pending", "completed"]:
             return (
@@ -3054,30 +3057,6 @@ def handle_queue_action(evt: gr.SelectData):
                 job.job_name,
                 gr.update(visible=True)
             )
-    elif button_clicked == "📋":
-        copy_job(job.job_name)
-        # After copying, show the original job's values in the edit form
-        return (
-            job.prompt,
-            job.n_prompt,
-            job.video_length,
-            job.seed,
-            job.use_teacache,
-            job.gpu_memory,
-            job.steps,
-            job.cfg,
-            job.gs,
-            job.rs,
-            job.mp4_crf,
-            job.keep_temp_png,
-            job.keep_temp_json,
-            job.outputs_folder,
-            job.job_history_folder,
-            job.keep_temp_mp4,
-            job.keep_completed_job,
-            "",  # Clear job_name for the copy
-            gr.update(visible=True)
-        )
     
     return empty_values
 
