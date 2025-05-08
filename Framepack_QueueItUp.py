@@ -1071,7 +1071,6 @@ def restore_job_defaults():
     ]
 
 def save_queue():
-    """Save queue state to JSON file"""
     try:
         jobs = [job.to_dict() for job in job_queue]
         with open(QUEUE_JSON_FILE, 'w') as f:
@@ -1083,7 +1082,6 @@ def save_queue():
         return False
 
 def load_queue():
-    """Load queue state from JSON file"""
     try:
         if os.path.exists(QUEUE_JSON_FILE):
             try:
@@ -2087,6 +2085,9 @@ def worker(next_job):
         alert_print(f"Error creating job folders: {str(e)}")
         traceback.print_exc()
         raise
+
+    debug_print(f"Starting worker for job {next_job.job_name}")
+    
     # prepare input_image & Handle text-to-video case
     if next_job.image_path == "text2video":
         worker_input_image = None
@@ -2287,7 +2288,6 @@ def worker(next_job):
                 if stream.input_queue.top() == 'abort':
                     stream.output_queue.push(('abort', None))
                     raise KeyboardInterrupt('User aborts the task.')
-
                 current_step = d['i'] + 1
                 step_percentage = int(100.0 * current_step / worker_steps)
                 step_desc = f'Step {current_step} of {worker_steps}'
@@ -2298,6 +2298,8 @@ def worker(next_job):
                 job_type = "Image to Video" if next_job.image_path != "text2video" else "Text 2 Video"
                 job_desc = f'Creating a {job_type} for job name {worker_job_name} , with these values seed: {worker_seed} cfg scale:{worker_gs} teacache:{worker_use_teacache} mp4_crf:{worker_mp4_crf} Created {current_time:.1f} second(s) of the {worker_video_length} second video - ({job_percentage}% complete), it will be saved in {worker_outputs_folder}{worker_job_name}.mp4'
                 job_progress = make_progress_bar_html(job_percentage, f'Job Progress: {job_percentage}%')
+                
+                
 
                 stream.output_queue.push(('progress', (preview, step_desc, step_progress, job_desc, job_progress)))
                 return
@@ -2380,7 +2382,6 @@ def worker(next_job):
             )
 
     completed_job = next_job
-    debug_print(f"Worker - Pushing done state for job: {completed_job.job_name if completed_job else 'None'}")
     stream.output_queue.push(('done', completed_job))
 
 # where was this          mp4_path = output_filename
@@ -2472,53 +2473,27 @@ def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=
 
 
 
-def process(process_state):
+def process():
     global stream
     stream = initialize_stream()
     
-    # Load process state
-    state = ProcessState.from_json(process_state)
-    debug_print(f"Process - Loaded state: is_processing={state.is_processing}, current_job_name={state.current_job_name}")
-
-    # If we're already processing and have a current job, restore the UI state
-    if state.is_processing and state.current_job_name:
-        debug_print(f"Process - Restoring state for job: {state.current_job_name}")
-        yield (
-            gr.update(interactive=True),      # queue_button
-            gr.update(interactive=False),     # start_button
-            gr.update(interactive=True),      # abort_button
-            gr.update(visible=True, value=state.last_preview),  # preview_image
-            gr.update(visible=True, value=state.current_video),  # result_video
-            f"processing job {state.current_job_name}...",  # progress_desc
-            "",   # progress_bar
-            update_queue_display(),           # queue_display
-            update_queue_table(),             # queue_table
-            state.to_json()                   # process_state
-        )
-        return
-
-    # Set processing state to True when starting
-    state.is_processing = True
-    save_queue()  # Save the processing state
-    debug_print(f"Process - Using stream object: {id(stream)}")
-
     # First check for pending jobs
     pending_jobs = [job for job in job_queue if job.status.lower() == "pending"]
 
     if not pending_jobs:
         # No pending jobs
-        state.is_processing = False
         yield (
-            gr.update(interactive=True),
-            gr.update(interactive=True),
-            gr.update(interactive=False),
-            None,
-            None,
-            "no pending jobs to process",
-            '',
-            update_queue_display(),
-            update_queue_table(),
-            state.to_json()
+            gr.update(interactive=True),      # queue_button
+            gr.update(interactive=True),      # start_button
+            gr.update(interactive=False),     # abort_button
+            None,                             # preview_image
+            gr.update(visible=False),         # result_video
+            "",                               # progress_desc1
+            "",                               # progress_bar1
+            "no pending jobs to process",     # progress_desc2
+            "",                               # progress_bar2
+            update_queue_display(),           # queue_display
+            update_queue_table()              # queue_table
         )
         return
 
@@ -2526,34 +2501,25 @@ def process(process_state):
     pending_job = pending_jobs[0]
     queue_table_update, queue_display_update = mark_job_processing(pending_job)
     save_queue()
-    job_name = pending_job.job_name
     
-    # Update process state with current job
-    state.current_job_name = job_name
-
-
-    # Save job parameters to JSON if enabled
-
-
     # Start processing
     debug_print(f"Starting worker for job {pending_job.job_name}")
     
     async_run(worker, pending_job)    ###### the first run is needed to start the stream all later runs will be dunt in the while true loop. pending job is the one that will be processed
 
-    # Initial yield - Modified to ensure UI elements are visible and properly initialized
+    # Initial yield - Fixed to include queue_table
     yield (
         gr.update(interactive=True),      # queue_button
         gr.update(interactive=False),     # start_button
         gr.update(interactive=True),      # abort_button
-        gr.update(visible=True),          # preview_image (Start: visible)
-        gr.update(value=None),            # result_video
-        "Initializing steps...",          # progress_desc1 (step progress)
-        make_progress_bar_html(0, "Preparing"),  # progress_bar1 (step progress)
-        "Starting job processing...",     # progress_desc2 (job progress)
-        make_progress_bar_html(0, "Job Progress"),  # progress_bar2 (job progress)
+        gr.update(visible=True),          # preview_image
+        gr.update(value=None),          # result_video
+        "",                               # progress_desc1
+        "",                               # progress_bar1
+        "Starting job processing...",     # progress_desc2
+        "",                               # progress_bar2
         update_queue_display(),           # queue_display
-        update_queue_table(),             # queue_table
-        state.to_json()                   # process_state
+        update_queue_table()              # queue_table
     )
 
     # Process output queue
@@ -2576,43 +2542,30 @@ def process(process_state):
                 if not os.path.isabs(output_filename):
                     output_filename = os.path.abspath(output_filename)
                 
-                # Store video path in state
-                state.current_video = output_filename
+
 
                 extract_thumb_from_processing_mp4(file_job, output_filename, job_percentage)
                 
-                # Update progress state for video segment
-                state.last_step_description = "Processing video segment..."
-                state.last_step_progress = make_progress_bar_html(100, "Video segment complete")
-                state.last_job_description = "Processing video segment..."
-                state.last_job_progress = make_progress_bar_html(100, "Video segment complete")
+
                 
                 yield (
                     gr.update(interactive=True),    # queue_button
                     gr.update(interactive=False),   # start_button
                     gr.update(interactive=True),    # abort_button
-                    gr.update(),        # preview_image (File Output: visible)
-                    output_filename,  # result_video
+                    gr.update(visible=True),        # preview_image (File Output: visible)
+                    gr.update(output_filename),  # result_video
                     "",    # keep last step progress
-                    make_progress_bar_html(100, ""),       # keep last step progress bar
+                    "",       # keep last step progress bar
                     "",     # keep last job progress
-                    make_progress_bar_html(100, ""),        #progress bar
+                    "",        # keep last job progress bar
                     update_queue_display(),         # queue_display
-                    update_queue_table(),           # queue_table
-                    state.to_json()                 # process_state
+                    update_queue_table()           # queue_table
                 )
                 
           #=======================PROGRESS STAGE=============
 
             if flag == 'progress':
                 preview, step_desc, step_progress, job_desc, job_progress = data
-                # Update state before yielding
-                # state.last_preview = preview_update
-                state.last_step_description = step_desc
-                state.last_step_progress = step_progress
-                state.last_job_description = job_desc
-                state.last_job_progress = job_progress
-
                 yield (
                     gr.update(interactive=True),    # queue_button
                     gr.update(interactive=False),   # start_button
@@ -2621,11 +2574,10 @@ def process(process_state):
                     gr.update(),                    # leave result_video as is
                     step_desc,                      # progress_desc1
                     step_progress,                  # progress_bar1 
-                    job_desc,                       # progress_desc2 
+                    job_desc, #causes flicker ?                     # progress_desc2 
                     job_progress,                   # progress_bar2 
                     update_queue_display(),         # queue_display
-                    update_queue_table(),           # queue_table
-                    state.to_json()                 # process_state
+                    update_queue_table()           # queue_table
                 )
 
 
@@ -2641,11 +2593,6 @@ def process(process_state):
                         queue_table_update, queue_display_update = mark_job_pending(aborted_job)
                         save_queue()
                         
-                        state.is_processing = False
-                        state.current_job_name = None
-                        # state.last_preview = None
-                        state.last_progress = "Job Aborted"
-                        state.last_progress_html = None
                         
                         yield (
                             gr.update(interactive=True),    # queue_button
@@ -2654,12 +2601,12 @@ def process(process_state):
                             gr.update(visible=False),       # preview_image (Abort: hidden)
                             gr.update(visible=False),       # result_video (Abort: hidden)
                             "Job Aborted",                  # progress_desc1 (step progress)
+
                             "",                            # progress_bar1 (step progress)
                             "Processing stopped",          # progress_desc2 (job progress)
                             "",                            # progress_bar2 (job progress)
                             update_queue_display(),         # queue_display
-                            update_queue_table(),           # queue_table
-                            state.to_json()                 # process_state
+                            update_queue_table()           # queue_table
                         )
 
                         return
@@ -2671,11 +2618,6 @@ def process(process_state):
 
 
                 # previous job completed
-                state.is_processing = True
-                state.current_job_name = completed_job.job_name
-                # state.last_preview = None
-                state.last_progress = "Job Complete"
-                state.last_progress_html = make_progress_bar_html(100, "Complete")
                 clean_up_temp_mp4png(completed_job)
                 debug_print(f"extracting thumb from completed job {completed_job.job_name}.mp4 to the outputs folder {completed_job.outputs_folder}")
                 mp4_path = os.path.join(completed_job.outputs_folder if hasattr(completed_job, 'outputs_folder') else Config.OUTPUTS_FOLDER, f"{completed_job.job_name}.mp4")
@@ -2697,20 +2639,18 @@ def process(process_state):
                         gr.update(interactive=False),    # start_button
                         gr.update(interactive=True),   # abort_button
                         gr.update(visible=True),       # preview_image 
-                        gr.update(value=state.current_video),  # show result_video with final file
+                        gr.update(output_filename),  # show result_video with final file
                         "Generation Complete",          # progress_desc1 (step progress)
                         make_progress_bar_html(100, "Complete"),  # progress_bar1 (step progress)
                         "Job Finished Successfully",    # progress_desc2 (job progress)
                         make_progress_bar_html(100, "Complete"),  # progress_bar2 (job progress)
                         update_queue_display(),         # queue_display
-                        update_queue_table(),           # queue_table
-                        state.to_json()                 # process_state
+                        update_queue_table()           # queue_table
                     )
                         
 
                     debug_print(f"Starting worker for job {next_job.job_name}")
                     async_run(worker, next_job)
-                    # Immediately yield initial UI state for the new job
                     yield (
                         gr.update(interactive=True),      # queue_button
                         gr.update(interactive=False),     # start_button
@@ -2722,8 +2662,7 @@ def process(process_state):
                         "Starting job processing...",     # progress_desc2 (job progress)
                         make_progress_bar_html(0, "Job Progress"),  # progress_bar2 (job progress)
                         update_queue_display(),           # queue_display
-                        update_queue_table(),             # queue_table
-                        state.to_json()                   # process_state
+                        update_queue_table()             # queue_table
                     )
 
                 else:
@@ -2733,23 +2672,19 @@ def process(process_state):
                         gr.update(interactive=True),   # start_button
                         gr.update(interactive=False),  # abort_button
                         None,  # preview_image
-                        gr.update(value=state.current_video),  # show result_video with final file
+                        gr.update(output_filename),  # show result_video with final file
                         "No more pending jobs to process",  # progress_desc1 (step progress)
                         make_progress_bar_html(100, "Complete"),  # progress_bar1 (step progress)
                         "Job Finished Successfully",    # progress_desc2 (job progress)
                         make_progress_bar_html(100, "Complete"),  # progress_bar2 (job progress)
                         update_queue_display(),        # queue_display
-                        update_queue_table(),         # queue_table
-                        state.to_json()                # process_state
+                        update_queue_table()         # queue_table
                     )
-                    state.is_processing = False
+
                     return
 
         except Exception as e:
             debug_print(f"Error in process loop: {str(e)}")
-            state.is_processing = False
-            state.current_job_name = None
-
             return
 
 def end_process():
@@ -3406,44 +3341,6 @@ def hide_edit_window():
     """Hide the edit window without saving changes"""
     return gr.update(visible=False)
 
-class ProcessState:
-    def __init__(self):
-        self.is_processing = False
-        self.current_job_name = None
-        # self.last_preview = None
-        self.last_step_description = None
-        self.last_step_progress = None
-        self.last_job_description = None
-        self.last_job_progress = None
-        self.current_video = None
-        
-    def to_json(self):
-        return {
-            "is_processing": self.is_processing,
-            "current_job_name": self.current_job_name,
-            # "last_preview": self.last_preview,
-            "last_step_description": self.last_step_description,
-            "last_step_progress": self.last_step_progress,
-            "last_job_description": self.last_job_description,
-            "last_job_progress": self.last_job_progress,
-            "current_video": self.current_video
-        }
-
-    @classmethod
-    def from_json(cls, data):
-        state = cls()
-        if data:
-            state.is_processing = data.get("is_processing", False)
-            state.current_job_name = data.get("current_job_name")
-            # state.last_preview = data.get("last_preview")
-            state.last_step_description = data.get("last_step_description")
-            state.last_step_progress = data.get("last_step_progress")
-            state.last_job_description = data.get("last_job_description")
-            state.last_job_progress = data.get("last_job_progress")
-            state.current_video = data.get("current_video")
-        return state
-
-
 
 
 def save_system_settings(new_outputs_folder, new_job_history_folder, new_debug_mode, new_keep_temp_mp4, new_keep_completed_job):
@@ -3636,16 +3533,9 @@ def restore_all_model_defaults():
         
 
 block = gr.Blocks(css=css).queue()
-
 with block:
-    # Add browser state for process tracking
-    process_state = gr.BrowserState(
-        default_value=ProcessState().to_json(),
-        storage_key="framepack_process_state"
-    )
-    
+   
     gr.Markdown('# FramePack (QueueItUp version)')
-    
     with gr.Tabs():
         with gr.Tab("Framepack_QueueItUp"):
             with gr.Row():
@@ -3708,41 +3598,7 @@ with block:
                     progress_desc2 = gr.Markdown('', elem_classes=['no-generating-animation', 'progress-desc'], elem_id="progress_desc2")  # Job progress (X/Y seconds)
                     progress_bar2 = gr.HTML('', elem_classes=['no-generating-animation', 'progress-bar'], elem_id="progress_bar2")  # Job progress bar
 
-                    # Add state change event handlers #questionable if needed anymore
-                    def update_ui_from_state(state_json):
-                        state = ProcessState.from_json(state_json)
-                        if state.is_processing:
-                            # Convert preview if it's a numpy array
-                            # preview_value = Image.fromarray(state.last_preview) if isinstance(state.last_preview, np.ndarray) else state.last_preview
-                            return {
-                                queue_button: gr.update(interactive=True),
-                                start_button: gr.update(interactive=False),
-                                abort_button: gr.update(interactive=True),
-                                preview_image: gr.update(visible=True),##### big test removal#, value=preview),#value=preview_value),
-                                result_video: gr.update(visible=True, value=state.current_video) if state.current_video else gr.update(visible=False),
-                                progress_desc1: state.last_step_description or "Initializing...",
-                                progress_bar1: state.last_step_progress or make_progress_bar_html(0, "Step Progress"),
-                                progress_desc2: state.last_job_description or "Starting job...",
-                                progress_bar2: state.last_job_progress or make_progress_bar_html(0, "Job Progress")
-                            }
-                        return {
-                            queue_button: gr.update(interactive=True),
-                            start_button: gr.update(interactive=True),
-                            abort_button: gr.update(interactive=False),
-                            preview_image: gr.update(visible=False),
-                            result_video: gr.update(visible=False),
-                            progress_desc1: "",
-                            progress_bar1: "",
-                            progress_desc2: "",
-                            progress_bar2: ""
-                        }
-                    
-                    # Connect state changes to UI updates
-                    process_state.change(
-                        fn=update_ui_from_state,
-                        inputs=[process_state],
-                        outputs=[queue_button, start_button, abort_button, preview_image, result_video, progress_desc1, progress_bar1, progress_desc2, progress_bar2]
-                    )
+
 
                     queue_display = gr.Gallery(
                         label="Job Queue Gallery",
@@ -4177,9 +4033,7 @@ with block:
     # Load queue on startup
     block.load(
         fn=lambda: (update_queue_table(), update_queue_display()),
-        inputs=None,
-        outputs=[queue_table, queue_display],
-        queue=False
+        outputs=[queue_table, queue_display]
     )
     # Connect queue actions
     queue_table.select(
@@ -4266,16 +4120,13 @@ with block:
     job_data = [input_image, prompt, n_prompt, seed, video_length, latent_window_size, steps, cfg, gs, rs, gpu_memory, use_teacache, mp4_crf, keep_temp_png, keep_temp_json]
     start_button.click(
         fn=process,
-        inputs=[
-            process_state
-        ],
+        inputs=[],
         outputs=[
             queue_button, start_button, abort_button,
             preview_image, result_video,
             progress_desc1, progress_bar1,
             progress_desc2, progress_bar2,
-            queue_display, queue_table,
-            process_state
+            queue_display, queue_table
         ]
     )
     abort_button.click(
@@ -4347,55 +4198,20 @@ def create_default_settings():
 
 
 
-
-
-def on_page_load(process_state):
-    """Handle page load/refresh by restoring the UI state"""
-    state = ProcessState.from_json(process_state)
-    debug_print(f"Page load - Restoring state: {state.to_json()}")
-    debug_print(f"Page load - Current job queue: {[job.job_name for job in job_queue]}")
-    
-    # Always update queue display and table
-    queue_display_update = update_queue_display()
-    queue_table_update = update_queue_table()
-    
-    if state.is_processing and state.current_job_name:
-        debug_print(f"Page load - Found active job: {state.current_job_name}")
-        # Find the current job in the queue
-        current_job = next((job for job in job_queue if job.job_name == state.current_job_name), None)
-        if current_job and current_job.status == "processing":
-            debug_print(f"Page load - Restoring UI for processing job: {current_job.job_name}")
-            # Job is still processing, restore full UI state
-            return (
-                gr.update(interactive=True),   # queue_button
-                gr.update(interactive=False),  # start_button
-                gr.update(interactive=True),   # abort_button
-                gr.update(visible=True),#, value=preview),#value=state.last_preview),  # preview_image
-                gr.update(visible=True, value=state.current_video),  # result_video
-                state.last_progress or "Resuming job...",  # progress_desc
-                state.last_progress_html or "",  # progress_bar
-                queue_display_update,
-                queue_table_update
-            )
-        else:
-            debug_print(f"Page load - Job {state.current_job_name} no longer processing")
-    
-    debug_print("Page load - No active job found or job no longer processing")
-    return (
-        gr.update(interactive=True),
-        gr.update(interactive=True),
-        gr.update(interactive=False),
-        gr.update(visible=False),
-        gr.update(visible=False),
-        "",
-        "",
-        queue_display_update,
-        queue_table_update
-    )
-
 block.load(
-    fn=on_page_load,
-    inputs=[process_state],
+    fn=lambda: (
+        gr.update(interactive=True),      # queue_button
+        gr.update(interactive=True),      # start_button
+        gr.update(interactive=False),     # abort_button
+        gr.update(visible=False),         # preview_image
+        gr.update(visible=False),         # result_video
+        "",                               # progress_desc1
+        "",                               # progress_bar1
+        "",                               # progress_desc2
+        "",                               # progress_bar2
+        update_queue_display(),           # queue_display
+        update_queue_table()              # queue_table
+    ),
     outputs=[
         queue_button, start_button, abort_button,
         preview_image, result_video,
@@ -4404,6 +4220,7 @@ block.load(
         queue_display, queue_table
     ]
 )
+
 
 # End of file
 
