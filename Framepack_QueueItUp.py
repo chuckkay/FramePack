@@ -1776,13 +1776,28 @@ def save_quick_prompt(prompt_text, n_prompt_text_value, video_length_value, job_
         )
 
 def delete_quick_prompt(prompt_text):
+    """Delete a quick prompt and return default values for all UI components"""
     global quick_prompts
     if prompt_text:
         quick_prompts = [item for item in quick_prompts if item['prompt'] != prompt_text]
         with open(QUICK_LIST_FILE, 'w') as f:
             json.dump(quick_prompts, f, indent=2)
-    # Clear the prompt box and quick list selection
-    return "", "", gr.update(choices=[item['prompt'] for item in quick_prompts], value=None), 5.0, 10.0, 25, True, -1, 1.0, 0.0, 6.0, 16
+    # Clear the prompt box and quick list selection, using Config defaults
+    return (
+        "",  # prompt (textbox)
+        "",  # n_prompt (textbox)
+        gr.update(choices=[item['prompt'] for item in quick_prompts], value=None),  # quick_list (dropdown)
+        Config.DEFAULT_VIDEO_LENGTH,  # video_length (slider)
+        Config.DEFAULT_JOB_NAME,  # job_name (textbox)
+        Config.DEFAULT_GS,  # gs (slider)
+        Config.DEFAULT_STEPS,  # steps (slider)
+        Config.DEFAULT_USE_TEACACHE,  # use_teacache (checkbox)
+        Config.DEFAULT_SEED,  # seed (number)
+        Config.DEFAULT_CFG,  # cfg (slider)
+        Config.DEFAULT_RS,  # rs (slider)
+        Config.DEFAULT_GPU_MEMORY,  # gpu_memory (slider)
+        Config.DEFAULT_MP4_CRF  # mp4_crf (slider)
+    )
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--share', action='store_true')
@@ -3590,11 +3605,11 @@ with block:
                         edit_video_length = gr.Slider(label="Edit Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
                         edit_seed = gr.Number(label="Edit Seed", value=-1, precision=0)
                         edit_use_teacache = gr.Checkbox(label='Edit Use TeaCache', value=True)
-                        edit_gpu_memory = gr.Slider(label="Edit GPU Memory Preservation (GB)", minimum=6, maximum=128, value=6, step=0.1)
                         edit_steps = gr.Slider(label="Edit Steps", minimum=1, maximum=100, value=25, step=1)
                         edit_cfg = gr.Slider(label="Edit CFG Scale", visible=False, minimum=1.0, maximum=32.0, value=1.0, step=0.01)
                         edit_gs = gr.Slider(label="Edit Distilled CFG Scale", minimum=1.0, maximum=32.0, value=10.0, step=0.01)
                         edit_rs = gr.Slider(label="Edit CFG Re-Scale", visible=False, minimum=0.0, maximum=1.0, value=0.0, step=0.01)
+                        edit_gpu_memory = gr.Slider(label="Edit GPU Memory Preservation (GB)", minimum=6, maximum=128, value=6, step=0.1)
                         edit_mp4_crf = gr.Slider(label="Edit MP4 Compression", minimum=0, maximum=100, value=16, step=1)
                         edit_keep_temp_png = gr.Checkbox(label="Edit Keep temp PNG", value=False)
                         edit_keep_temp_json = gr.Checkbox(label="Edit Keep temp JSON", value=False)
@@ -3956,10 +3971,10 @@ with block:
         queue=False
     )
     quick_list.change(
-        lambda x, current_n_prompt, current_length, current_job_name, current_gs, current_steps, current_teacache, current_seed, current_cfg, current_rs, current_gpu_memory, current_mp4_crf: (
+        lambda x, current_n_prompt, current_length, current_job_name, current_gs, current_steps, current_teacache, current_seed, current_cfg, current_rs, current_gpu_memory, current_mp4_crf, current_keep_temp_png, current_keep_temp_json: (
             x,  # prompt
             next((item.get('n_prompt', current_n_prompt) for item in quick_prompts if item['prompt'] == x), current_n_prompt),  # n_prompt
-            next((item.get('length', current_length) for item in quick_prompts if item['prompt'] == x), current_length),  # video_length
+            next((item.get('video_length', current_length) for item in quick_prompts if item['prompt'] == x), current_length),  # video_length
             next((item.get('job_name', current_job_name) for item in quick_prompts if item['prompt'] == x), current_job_name),  # job_name
             next((item.get('gs', current_gs) for item in quick_prompts if item['prompt'] == x), current_gs),  # gs
             next((item.get('steps', current_steps) for item in quick_prompts if item['prompt'] == x), current_steps),  # steps
@@ -3968,10 +3983,12 @@ with block:
             next((item.get('cfg', current_cfg) for item in quick_prompts if item['prompt'] == x), current_cfg),  # cfg
             next((item.get('rs', current_rs) for item in quick_prompts if item['prompt'] == x), current_rs),  # rs
             next((item.get('gpu_memory', current_gpu_memory) for item in quick_prompts if item['prompt'] == x), current_gpu_memory),  # gpu_memory
-            next((item.get('mp4_crf', current_mp4_crf) for item in quick_prompts if item['prompt'] == x), current_mp4_crf)  # mp4_crf
-        ) if x else (x, current_n_prompt, current_length, current_job_name, current_gs, current_steps, current_teacache, current_seed, current_cfg, current_rs, current_gpu_memory, current_mp4_crf),
-        inputs=[quick_list, n_prompt, video_length, job_name, gs, steps, use_teacache, seed, cfg, rs, gpu_memory, mp4_crf],
-        outputs=[prompt, n_prompt, video_length, job_name, gs, steps, use_teacache, seed, cfg, rs, gpu_memory, mp4_crf],
+            next((item.get('mp4_crf', current_mp4_crf) for item in quick_prompts if item['prompt'] == x), current_mp4_crf),  # mp4_crf
+            next((item.get('keep_temp_png', current_keep_temp_png) for item in quick_prompts if item['prompt'] == x), current_keep_temp_png),  # keep_temp_png
+            next((item.get('keep_temp_json', current_keep_temp_json) for item in quick_prompts if item['prompt'] == x), current_keep_temp_json)  # keep_temp_json
+        ) if x else (x, current_n_prompt, current_length, current_job_name, current_gs, current_steps, current_teacache, current_seed, current_cfg, current_rs, current_gpu_memory, current_mp4_crf, current_keep_temp_png, current_keep_temp_json),
+        inputs=[quick_list, n_prompt, video_length, job_name, gs, steps, use_teacache, seed, cfg, rs, gpu_memory, mp4_crf, keep_temp_png, keep_temp_json],
+        outputs=[prompt, n_prompt, video_length, job_name, gs, steps, use_teacache, seed, cfg, rs, gpu_memory, mp4_crf, keep_temp_png, keep_temp_json],
         queue=False
     )
 
