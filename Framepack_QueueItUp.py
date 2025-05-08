@@ -1878,14 +1878,7 @@ else:
     vae.to(gpu)
     transformer.to(gpu)
 
-# Move stream creation to module level, before the process and worker functions
-stream = None
 
-def initialize_stream():
-    global stream
-    if stream is None:
-        stream = AsyncStream()
-    return stream
 
 def clean_up_temp_mp4png(job):
     job_name = job.job_name
@@ -2296,7 +2289,7 @@ def worker(next_job):
                 current_time = max(0, (total_generated_latent_frames * 4 - 3) / 30)
                 job_percentage = int((current_time / worker_video_length) * 100)
                 job_type = "Image to Video" if next_job.image_path != "text2video" else "Text 2 Video"
-                job_desc = f'Creating a {job_type} for job name {worker_job_name} , with these values seed: {worker_seed} cfg scale:{worker_gs} teacache:{worker_use_teacache} mp4_crf:{worker_mp4_crf} Created {current_time:.1f} second(s) of the {worker_video_length} second video - ({job_percentage}% complete), it will be saved in {worker_outputs_folder}{worker_job_name}.mp4'
+                job_desc = f'Creating a {job_type} video for job name {worker_job_name} , with these values seed: {worker_seed} cfg scale:{worker_gs} teacache:{worker_use_teacache} mp4_crf:{worker_mp4_crf} Created {current_time:.1f} second(s) of the {worker_video_length} second video - ({job_percentage}% complete), it will be saved in {worker_outputs_folder}{worker_job_name}.mp4'
                 job_progress = make_progress_bar_html(job_percentage, f'Job Progress: {job_percentage}%')
                 
                 
@@ -2470,31 +2463,14 @@ def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=
         cap.release()
     return(next_job, output_filename)
 
-
-
-
 def process():
     global stream
-    stream = initialize_stream()
-    
+    # assert input_image is not None, 'No input image!'
+
     # First check for pending jobs
     pending_jobs = [job for job in job_queue if job.status.lower() == "pending"]
 
     if not pending_jobs:
-        # No pending jobs
-        yield (
-            gr.update(interactive=True),      # queue_button
-            gr.update(interactive=True),      # start_button
-            gr.update(interactive=False),     # abort_button
-            None,                             # preview_image
-            gr.update(visible=False),         # result_video
-            "",                               # progress_desc1
-            "",                               # progress_bar1
-            "no pending jobs to process",     # progress_desc2
-            "",                               # progress_bar2
-            update_queue_display(),           # queue_display
-            update_queue_table()              # queue_table
-        )
         return
 
     # Process first pending job
@@ -2504,25 +2480,26 @@ def process():
     
     # Start processing
     debug_print(f"Starting worker for job {pending_job.job_name}")
-    
-    async_run(worker, pending_job)    ###### the first run is needed to start the stream all later runs will be dunt in the while true loop. pending job is the one that will be processed
-
-    # Initial yield - Fixed to include queue_table
+     # Initial yield - Fixed to include queue_table
     yield (
         gr.update(interactive=True),      # queue_button
         gr.update(interactive=False),     # start_button
         gr.update(interactive=True),      # abort_button
-        gr.update(visible=True),          # preview_image
-        gr.update(value=None),          # result_video
+        None,          # preview_image
+        None,          # result_video
         "",                               # progress_desc1
         "",                               # progress_bar1
-        "Starting job processing...",     # progress_desc2
+        "",     # progress_desc2
         "",                               # progress_bar2
         update_queue_display(),           # queue_display
         update_queue_table()              # queue_table
-    )
+    ) 
+    
 
-    # Process output queue
+    stream = AsyncStream()    
+    async_run(worker, pending_job)    ###### the first run is needed to start the stream all later runs will be dunt in the while true loop. pending job is the one that will be processed
+
+    output_filename = None
     while True:
         try:
             flag, data = stream.output_queue.next()
@@ -2539,8 +2516,8 @@ def process():
                 
                 
                 # Ensure path is absolute
-                if not os.path.isabs(output_filename):
-                    output_filename = os.path.abspath(output_filename)
+                # if not os.path.isabs(output_filename):
+                    # output_filename = os.path.abspath(output_filename)
                 
 
 
@@ -2552,12 +2529,12 @@ def process():
                     gr.update(interactive=True),    # queue_button
                     gr.update(interactive=False),   # start_button
                     gr.update(interactive=True),    # abort_button
-                    gr.update(visible=True),        # preview_image (File Output: visible)
-                    gr.update(output_filename),  # result_video
-                    "",    # keep last step progress
-                    "",       # keep last step progress bar
-                    "",     # keep last job progress
-                    "",        # keep last job progress bar
+                    gr.update(),        # preview_image (File Output: visible)
+                    gr.update(visible=True, value=output_filename), # result_video
+                    gr.update(),    # keep last step progress
+                    gr.update(),       # keep last step progress bar
+                    gr.update(),     # keep last job progress
+                    gr.update(),        # keep last job progress bar
                     update_queue_display(),         # queue_display
                     update_queue_table()           # queue_table
                 )
@@ -2635,35 +2612,23 @@ def process():
                     queue_table_update, queue_display_update = mark_job_processing(next_job)
                     save_queue()
                     yield (
-                        gr.update(interactive=True),    # queue_button
-                        gr.update(interactive=False),    # start_button
-                        gr.update(interactive=True),   # abort_button
-                        gr.update(visible=True),       # preview_image 
-                        gr.update(output_filename),  # show result_video with final file
-                        "Generation Complete",          # progress_desc1 (step progress)
-                        make_progress_bar_html(100, "Complete"),  # progress_bar1 (step progress)
-                        "Job Finished Successfully",    # progress_desc2 (job progress)
-                        make_progress_bar_html(100, "Complete"),  # progress_bar2 (job progress)
-                        update_queue_display(),         # queue_display
-                        update_queue_table()           # queue_table
-                    )
+                        gr.update(interactive=True),      # queue_button
+                        gr.update(interactive=False),     # start_button
+                        gr.update(interactive=True),      # abort_button
+                        None,          # preview_image
+                        None,            # result_video
+                        "",          #
+                        "",          #
+                        "",          #
+                        "",          #
+                        "",          #
+                        update_queue_display(),           # queue_display
+                        update_queue_table()             # queue_table
+                        )
                         
 
                     debug_print(f"Starting worker for job {next_job.job_name}")
                     async_run(worker, next_job)
-                    yield (
-                        gr.update(interactive=True),      # queue_button
-                        gr.update(interactive=False),     # start_button
-                        gr.update(interactive=True),      # abort_button
-                        gr.update(visible=True),          # preview_image
-                        gr.update(value=None),            # result_video
-                        "Initializing steps...",          # progress_desc1 (step progress)
-                        make_progress_bar_html(0, "Preparing"),  # progress_bar1 (step progress)
-                        "Starting job processing...",     # progress_desc2 (job progress)
-                        make_progress_bar_html(0, "Job Progress"),  # progress_bar2 (job progress)
-                        update_queue_display(),           # queue_display
-                        update_queue_table()             # queue_table
-                    )
 
                 else:
                     debug_print("No more pending jobs to process")
@@ -4118,6 +4083,9 @@ with block:
     )
 
     job_data = [input_image, prompt, n_prompt, seed, video_length, latent_window_size, steps, cfg, gs, rs, gpu_memory, use_teacache, mp4_crf, keep_temp_png, keep_temp_json]
+        
+    
+    
     start_button.click(
         fn=process,
         inputs=[],
