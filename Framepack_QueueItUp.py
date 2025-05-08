@@ -174,24 +174,6 @@ def restore_model_default(model_type):
     except Exception as e:
         return f"Error restoring {model_type} default: {str(e)}", None, None, None, None, None, None, None, None
 
-def get_truncated_state_info(state):
-    """Helper function to create truncated state info for debugging"""
-    preview_info = None
-    # if state.last_preview is not None:
-        # if isinstance(state.last_preview, np.ndarray):
-            # preview_info = f"<Image array with shape={state.last_preview.shape}>"
-        # elif isinstance(state.last_preview, Image.Image):
-            # preview_info = f"<PIL Image with size={state.last_preview.size}>"
-        # else:
-            # preview_info = "<Unknown image format>"
-            
-    return {
-        'is_processing': state.is_processing,
-        'current_job_name': state.current_job_name,
-        # 'last_preview': preview_info,
-        'last_progress': state.last_progress,
-        'last_progress_html': '...' if state.last_progress_html else None
-    }
 
 def download_model_from_huggingface(model_id):
     """Download a model from Hugging Face and return its local path"""
@@ -2381,11 +2363,15 @@ def worker(next_job):
             output_filename = os.path.join(outputs_folder, f'{worker_job_name}_{total_generated_latent_frames}.mp4')
             save_bcthw_as_mp4(history_pixels, output_filename, fps=30, crf=worker_mp4_crf)
             
-            stream.output_queue.push(('file', output_filename))
+            # Calculate current progress percentage
+            current_time = max(0, (total_generated_latent_frames * 4 - 3) / 30)
+            job_percentage = int((current_time / worker_video_length) * 100)
+            stream.output_queue.push(('file', (output_filename, job_percentage)))
 
             print(f'Decoded. Current latent shape {real_history_latents.shape}; pixel shape {history_pixels.shape}')
 
     except:
+
         traceback.print_exc()
         
         if not high_vram:
@@ -2397,7 +2383,10 @@ def worker(next_job):
     debug_print(f"Worker - Pushing done state for job: {completed_job.job_name if completed_job else 'None'}")
     stream.output_queue.push(('done', completed_job))
 
-def extract_thumb_from_processing_mp4(next_job, output_filename):
+# where was this          mp4_path = output_filename
+            
+            
+def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=0):
     mp4_path = output_filename
     status_overlay = "RUNNING" if next_job.status=="processing" else "DONE" if next_job.status=="completed" else next_job.status.upper()
     status_color = {
@@ -2435,45 +2424,51 @@ def extract_thumb_from_processing_mp4(next_job, output_filename):
             y_off = (THUMB_SIZE - new_h) // 2
             thumb[y_off : y_off + new_h, x_off : x_off + new_w] = resized
 
-            # Overlay centered status text
-            text = (f"{status_overlay}")
+            # Overlay centered status text, 
             font = cv2.FONT_HERSHEY_SIMPLEX
             scale = 1
             thickness = 2
 
-            # Calculate text size to center it
-            (text_w, text_h), _ = cv2.getTextSize(text, font, scale, thickness)
-            x = (thumb.shape[1] - text_w) // 2
-            y = (thumb.shape[0] + text_h) // 2
-
-            # Add a black outline to make text more readable
-            cv2.putText(
-                thumb,
-                text,
-                (x, y),
-                font,
-                scale,
-                (0, 0, 0),  # Black outline
-                thickness + 2,
-                cv2.LINE_AA
-            )
-
-            # Add the colored text
-            cv2.putText(
-                thumb,
-                text,
-                (x, y),
-                font,
-                scale,
-                status_color,
-                thickness,
-                cv2.LINE_AA
-            )
+            if next_job.status == "processing":
+                text1 = f"{job_percentage}%"
+                text2 = "RUNNING"
+                
+                # Calculate text sizes for both lines
+                (text1_w, text1_h), _ = cv2.getTextSize(text1, font, scale, thickness)
+                (text2_w, text2_h), _ = cv2.getTextSize(text2, font, scale, thickness)
+                
+                x1 = (thumb.shape[1] - text1_w) // 2
+                x2 = (thumb.shape[1] - text2_w) // 2
+                y1 = (thumb.shape[0] - text2_h) // 2  # Center vertically
+                y2 = y1 + text2_h + 10  # Add small gap between lines
+                
+                # Add black outline and text for both lines
+                for offset in [(-1,-1), (-1,1), (1,-1), (1,1)]:
+                    cv2.putText(thumb, text1, (x1+offset[0], y1+offset[1]), font, scale, (0,0,0), thickness+2, cv2.LINE_AA)
+                    cv2.putText(thumb, text2, (x2+offset[0], y2+offset[1]), font, scale, (0,0,0), thickness+2, cv2.LINE_AA)
+                
+                # Add colored text
+                cv2.putText(thumb, text1, (x1, y1), font, scale, status_color, thickness, cv2.LINE_AA)
+                cv2.putText(thumb, text2, (x2, y2), font, scale, status_color, thickness, cv2.LINE_AA)
+            else:
+                # Single line for other statuses
+                text = status_overlay
+                (text_w, text_h), _ = cv2.getTextSize(text, font, scale, thickness)
+                x = (thumb.shape[1] - text_w) // 2
+                y = (thumb.shape[0] + text_h) // 2
+                
+                # Add black outline
+                for offset in [(-1,-1), (-1,1), (1,-1), (1,1)]:
+                    cv2.putText(thumb, text, (x+offset[0], y+offset[1]), font, scale, (0,0,0), thickness+2, cv2.LINE_AA)
+                
+                # Add colored text
+                cv2.putText(thumb, text, (x, y), font, scale, status_color, thickness, cv2.LINE_AA)
 
             thumb_path = os.path.join(temp_queue_images, f'thumb_{next_job.job_name}.png')
             cv2.imwrite(thumb_path, thumb)
         cap.release()
     return(next_job, output_filename)
+
 
 
 
@@ -2494,8 +2489,8 @@ def process(process_state):
             gr.update(interactive=True),      # abort_button
             gr.update(visible=True, value=state.last_preview),  # preview_image
             gr.update(visible=True, value=state.current_video),  # result_video
-            state.last_progress or f"processing job {state.current_job_name}...",  # progress_desc
-            state.last_progress_html or "",   # progress_bar
+            f"processing job {state.current_job_name}...",  # progress_desc
+            "",   # progress_bar
             update_queue_display(),           # queue_display
             update_queue_table(),             # queue_table
             state.to_json()                   # process_state
@@ -2569,7 +2564,7 @@ def process(process_state):
 
             if flag == 'file':
                 debug_print("[DEBUG] Process - Handling file flag")
-                output_filename = data
+                output_filename, job_percentage = data
                 
                 
                 processing_jobs = [job for job in job_queue if job.status.lower() == "processing"]
@@ -2583,7 +2578,8 @@ def process(process_state):
                 
                 # Store video path in state
                 state.current_video = output_filename
-                extract_thumb_from_processing_mp4(file_job, output_filename)
+
+                extract_thumb_from_processing_mp4(file_job, output_filename, job_percentage)
                 
                 # Update progress state for video segment
                 state.last_step_description = "Processing video segment..."
@@ -2595,19 +2591,20 @@ def process(process_state):
                     gr.update(interactive=True),    # queue_button
                     gr.update(interactive=False),   # start_button
                     gr.update(interactive=True),    # abort_button
-                    gr.update(visible=True),        # preview_image (File Output: visible)
-                    gr.update(value=state.current_video),  # result_video
-                    state.last_step_description,    # keep last step progress
-                    state.last_step_progress,       # keep last step progress bar
-                    state.last_job_description,     # keep last job progress
-                    state.last_job_progress,        # keep last job progress bar
+                    gr.update(),        # preview_image (File Output: visible)
+                    output_filename,  # result_video
+                    "",    # keep last step progress
+                    make_progress_bar_html(100, ""),       # keep last step progress bar
+                    "",     # keep last job progress
+                    make_progress_bar_html(100, ""),        #progress bar
                     update_queue_display(),         # queue_display
                     update_queue_table(),           # queue_table
                     state.to_json()                 # process_state
                 )
+                
+          #=======================PROGRESS STAGE=============
 
             if flag == 'progress':
-                #worker has pushed to progress flag  - None, Start sampling...,  progress_bar Step Progress, Processing..., make_progress_bar_html Job Progress
                 preview, step_desc, step_progress, job_desc, job_progress = data
                 # Update state before yielding
                 # state.last_preview = preview_update
@@ -2615,17 +2612,17 @@ def process(process_state):
                 state.last_step_progress = step_progress
                 state.last_job_description = job_desc
                 state.last_job_progress = job_progress
-                
+
                 yield (
                     gr.update(interactive=True),    # queue_button
                     gr.update(interactive=False),   # start_button
                     gr.update(interactive=True),    # abort_button
-                    gr.update(visible=True, value=preview), # preview_image (Progress: visible)
+                    gr.update(visible=True, value=preview), # preview_image
                     gr.update(),                    # leave result_video as is
-                    step_desc,                      # progress_desc1 (step progress)
-                    step_progress,                  # progress_bar1 (step progress)
-                    job_desc,                       # progress_desc2 (job progress)
-                    job_progress,                   # progress_bar2 (job progress)
+                    step_desc,                      # progress_desc1
+                    step_progress,                  # progress_bar1 
+                    job_desc,                       # progress_desc2 
+                    job_progress,                   # progress_bar2 
                     update_queue_display(),         # queue_display
                     update_queue_table(),           # queue_table
                     state.to_json()                 # process_state
@@ -2640,6 +2637,7 @@ def process(process_state):
                         alert_print(f"trying to save aborted job to outputs folder {aborted_job.outputs_folder}")
                         mp4_path = os.path.join(aborted_job.outputs_folder if hasattr(aborted_job, 'outputs_folder') else Config.OUTPUTS_FOLDER, f"{aborted_job.job_name}.mp4") 
                         extract_thumb_from_processing_mp4(aborted_job, mp4_path)
+                        debug_print(f"aborted job video saved to outputs folder {aborted_job.outputs_folder}")
                         queue_table_update, queue_display_update = mark_job_pending(aborted_job)
                         save_queue()
                         
@@ -3793,9 +3791,9 @@ with block:
                         edit_use_teacache = gr.Checkbox(label='Edit Use TeaCache', value=True)
                         edit_gpu_memory = gr.Slider(label="Edit GPU Memory Preservation (GB)", minimum=6, maximum=128, value=6, step=0.1)
                         edit_steps = gr.Slider(label="Edit Steps", minimum=1, maximum=100, value=25, step=1)
-                        edit_cfg = gr.Slider(label="Edit CFG Scale", minimum=1.0, maximum=32.0, value=1.0, step=0.01)
+                        edit_cfg = gr.Slider(label="Edit CFG Scale", visible=False, minimum=1.0, maximum=32.0, value=1.0, step=0.01)
                         edit_gs = gr.Slider(label="Edit Distilled CFG Scale", minimum=1.0, maximum=32.0, value=10.0, step=0.01)
-                        edit_rs = gr.Slider(label="Edit CFG Re-Scale", minimum=0.0, maximum=1.0, value=0.0, step=0.01)
+                        edit_rs = gr.Slider(label="Edit CFG Re-Scale", visible=False, minimum=0.0, maximum=1.0, value=0.0, step=0.01)
                         edit_mp4_crf = gr.Slider(label="Edit MP4 Compression", minimum=0, maximum=100, value=16, step=1)
                         edit_keep_temp_png = gr.Checkbox(label="Edit Keep temp PNG", value=False)
                         edit_keep_temp_json = gr.Checkbox(label="Edit Keep temp JSON", value=False)
@@ -4284,26 +4282,7 @@ with block:
         fn=end_process,
         outputs=[queue_table, queue_display, start_button, abort_button, queue_button]
     )
-    debug_print("=== Connecting queue_button.click components ===")
-    debug_print(f"input_image type: {type(input_image)}")
-    debug_print(f"prompt type: {type(prompt)}")
-    debug_print(f"video_length type: {type(video_length)}")
-    debug_print(f"seed type: {type(seed)}")
-    debug_print(f"job_name type: {type(job_name)}")
-    debug_print(f"use_teacache type: {type(use_teacache)}")
-    debug_print(f"gpu_memory type: {type(gpu_memory)}")
-    debug_print(f"steps type: {type(steps)}")
-    debug_print(f"cfg type: {type(cfg)}")
-    debug_print(f"gs type: {type(gs)}")
-    debug_print(f"rs type: {type(rs)}")
-    debug_print(f"mp4_crf type: {type(mp4_crf)}")
-    debug_print(f"keep_temp_png type: {type(keep_temp_png)}")
-    debug_print(f"keep_temp_json type: {type(keep_temp_json)}")
-    debug_print(f"create_job_outputs_folder type: {type(create_job_outputs_folder)}")
-    debug_print(f"create_job_history_folder type: {type(create_job_history_folder)}")
-    debug_print(f"keep_temp_mp4 type: {type(keep_temp_mp4)}")
-    debug_print(f"create_job_keep_completed_job type: {type(create_job_keep_completed_job)}")
-    debug_print("=====================================")
+
 
     queue_button.click(
         fn=add_to_queue_handler,
