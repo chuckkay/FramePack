@@ -546,10 +546,6 @@ QUEUE_JSON_FILE = os.path.join(os.getcwd(), 'job_queue.json')
 temp_queue_images = os.path.join(os.getcwd(), 'temp_queue_images')
 os.makedirs(temp_queue_images, exist_ok=True)
 
-#################are these needed Global Hardcoded Defaults (overriden by anything in INI_FILE)
-#debug_mode = True
-# keep_temp_mp4 = False
-# keep_completed_job = True
 
 # ANSI color codes
 YELLOW = '\033[93m'
@@ -2740,8 +2736,10 @@ def process(process_state):
                         gr.update(interactive=False),  # abort_button
                         None,  # preview_image
                         gr.update(value=state.current_video),  # show result_video with final file
-                        "No more pending jobs to process",  # progress_desc
+                        "No more pending jobs to process",  # progress_desc1 (step progress)
+                        make_progress_bar_html(100, "Complete"),  # progress_bar1 (step progress)
                         "Job Finished Successfully",    # progress_desc2 (job progress)
+                        make_progress_bar_html(100, "Complete"),  # progress_bar2 (job progress)
                         update_queue_display(),        # queue_display
                         update_queue_table(),         # queue_table
                         state.to_json()                # process_state
@@ -3767,6 +3765,7 @@ with block:
                 delete_failed_button = gr.Button(value="Delete Failed Jobs", interactive=True)
                 delete_all_button = gr.Button(value="Delete All Jobs", interactive=True)
             gr.Markdown("Note: Jobs that are Processing are always listed at the top, Jobs that are completed are always at the bottom")
+            gr.Markdown("you can edit any job including completed jobs, click the pencil icon make changes and click save, it will switch from completed to pending and can be processed again, if you like the seed check the corresponding job histore json file to grab the seed and change the -1 to the actual seed used")
             # Add edit dialog
             with gr.Row():
                 with gr.Column():
@@ -3800,7 +3799,7 @@ with block:
                         edit_mp4_crf = gr.Slider(label="Edit MP4 Compression", minimum=0, maximum=100, value=16, step=1)
                         edit_keep_temp_png = gr.Checkbox(label="Edit Keep temp PNG", value=False)
                         edit_keep_temp_json = gr.Checkbox(label="Edit Keep temp JSON", value=False)
-                        edit_outputs_folder = gr.Textbox(label="Edit Outputs Folder", value=Config.OUTPUTS_FOLDER)
+                        edit_outputs_folder = gr.Textbox(label="Edit Outputs Folder - (be careful with this setting as it can cause errors if not set correctly)", value=Config.OUTPUTS_FOLDER)
                         edit_job_history_folder = gr.Textbox(label="Edit Job History Folder", value=Config.JOB_HISTORY_FOLDER)
                         edit_keep_temp_mp4 = gr.Checkbox(label="Edit Keep temp MP4", value=Config.KEEP_TEMP_MP4)
                         edit_keep_completed_job = gr.Checkbox(label="Edit Keep Completed Jobs", value=Config.KEEP_COMPLETED_JOB)
@@ -3925,7 +3924,7 @@ with block:
                                 outputs=[gr.Markdown()]
                             )
                             
-                            gr.Markdown("### Model Selection change at your own risk")
+                            gr.Markdown("### Model Selection BETA not really working yet - change at your own risk")
                             with gr.Row():
                                 include_online_models = gr.Checkbox(label="Include Online Models", value=False)
                                 refresh_models_button = gr.Button("Refresh Model List")
