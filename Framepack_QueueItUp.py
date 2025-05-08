@@ -2146,7 +2146,7 @@ def worker(next_job):
     worker_mp4_crf = next_job.mp4_crf if hasattr(next_job, 'mp4_crf') else Config.DEFAULT_MP4_CRF
     worker_keep_temp_png = next_job.keep_temp_png if hasattr(next_job, 'keep_temp_png') else Config.DEFAULT_KEEP_TEMP_PNG
     worker_keep_temp_json = next_job.keep_temp_json if hasattr(next_job, 'keep_temp_json') else Config.DEFAULT_KEEP_TEMP_JSON
-  #  worker_outputs_folder = next_job.outputs_folder if hasattr(next_job, 'outputs_folder') else Config.OUTPUTS_FOLDER
+    worker_outputs_folder = next_job.outputs_folder if hasattr(next_job, 'outputs_folder') else Config.OUTPUTS_FOLDER
     worker_job_history_folder = next_job.job_history_folder if hasattr(next_job, 'job_history_folder') else Config.JOB_HISTORY_FOLDER
     worker_keep_temp_mp4 = next_job.keep_temp_mp4 if hasattr(next_job, 'keep_temp_mp4') else Config.KEEP_TEMP_MP4
     worker_keep_completed_job = next_job.keep_completed_job if hasattr(next_job, 'keep_completed_job') else Config.KEEP_COMPLETED_JOB
@@ -2318,7 +2318,7 @@ def worker(next_job):
                 current_time = max(0, (total_generated_latent_frames * 4 - 3) / 30)
                 job_percentage = int((current_time / worker_video_length) * 100)
                 job_type = "Image to Video" if next_job.image_path != "text2video" else "Text 2 Video"
-                job_desc = f'Creating a {job_type} for job name {worker_job_name} , with these values seed: {worker_seed} cfg scale:{worker_gs} teacache:{worker_use_teacache} mp4_crf:{worker_mp4_crf} \\n Created {current_time:.1f} second(s) of the {worker_video_length} second video - ({job_percentage}% complete)'
+                job_desc = f'Creating a {job_type} for job name {worker_job_name} , with these values seed: {worker_seed} cfg scale:{worker_gs} teacache:{worker_use_teacache} mp4_crf:{worker_mp4_crf} Created {current_time:.1f} second(s) of the {worker_video_length} second video - ({job_percentage}% complete), it will be saved in {worker_outputs_folder}{worker_job_name}.mp4'
                 job_progress = make_progress_bar_html(job_percentage, f'Job Progress: {job_percentage}%')
 
                 stream.output_queue.push(('progress', (preview, step_desc, step_progress, job_desc, job_progress)))
@@ -2683,7 +2683,7 @@ def process(process_state):
                 state.last_progress = "Job Complete"
                 state.last_progress_html = make_progress_bar_html(100, "Complete")
                 clean_up_temp_mp4png(completed_job)
-                alert_print(f"trying to extract thumb  from completed job {completed_job.job_name}  video  {completed_job.outputs_folder}")
+                debug_print(f"extracting thumb from completed job {completed_job.job_name}.mp4 to the outputs folder {completed_job.outputs_folder}")
                 mp4_path = os.path.join(completed_job.outputs_folder if hasattr(completed_job, 'outputs_folder') else Config.OUTPUTS_FOLDER, f"{completed_job.job_name}.mp4")
                 extract_thumb_from_processing_mp4(completed_job, mp4_path)
                 mark_job_completed(completed_job)
@@ -3832,8 +3832,10 @@ with block:
                                 info="This setting cannot be changed. Videos are initially saved here and then moved to your custom folder if specified in the job settings."
                             )
                             settings_job_history_folder = gr.Textbox(
-                                label="Job History Folder (where the individual job json files and input image are stored with the jobs metadata)", 
-                                value=Config.JOB_HISTORY_FOLDER
+                                label="Job History Folder (is where the individual job json files and input image are stored with the jobs metadata)", 
+                                value=Config.JOB_HISTORY_FOLDER,
+                                interactive=False,
+                                info="This setting cannot be changed here,  it can be changed on a per job or batch job basis if specified in the job settings or edit settings."
                             )
                             settings_debug_mode = gr.Checkbox(
                                 label="Debug Mode", 
