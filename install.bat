@@ -1,19 +1,43 @@
 @echo off
 setlocal
+setlocal EnableDelayedExpansion
 
 REM ================================================
-REM install.bat — idempotent setup for QueueItUp_FramePack
+REM install.bat — idempotent setup for FramePack - QueueItUp Version
 REM ================================================
 
-REM 1) Check for Conda
+REM 1) Check for Conda and install if not found
 echo.
 echo === Checking for Conda installation ===
 where conda >nul 2>&1
 if errorlevel 1 (
-  echo ERROR: Conda not found. Install Miniconda:
-  echo   https://docs.conda.io/en/latest/miniconda.html
-  pause
-  exit /b 1
+  echo Conda not found. Downloading and installing Miniconda...
+  
+  REM Download Miniconda installer
+  curl -o miniconda.exe https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe
+  if errorlevel 1 (
+    echo ERROR: Failed to download Miniconda installer
+    pause
+    exit /b 1
+  )
+  
+  REM Install Miniconda silently
+  echo Installing Miniconda...
+  start /wait "" miniconda.exe /InstallationType=JustMe /RegisterPython=0 /S /D=%UserProfile%\Miniconda3
+  if errorlevel 1 (
+    echo ERROR: Miniconda installation failed
+    pause
+    exit /b 1
+  )
+  
+  REM Delete the installer
+  del miniconda.exe
+  
+  REM Add Conda to the current session's PATH
+  set "PATH=%UserProfile%\Miniconda3;%UserProfile%\Miniconda3\Scripts;%UserProfile%\Miniconda3\Library\bin;%PATH%"
+  
+  echo Miniconda installed successfully!
+  echo.
 )
 
 REM 2) Verify repo root
@@ -30,32 +54,43 @@ echo.
 echo === Pulling latest changes ===
 git pull || echo WARNING: git pull failed, continuing
 
-REM 4) (Re)create the Conda env unconditionally, then pause
+REM 4) (Re)create the Conda env unconditionally, then prompt
 echo.
-set "ENV_NAME=QueueItUp_FramePack"
-echo === Creating or updating Conda env %ENV_NAME% ===
-REM <-- “call” is required so control returns to this script
-call conda create -n "%ENV_NAME%" python=3.10.6 pip=25.0 -y
+set "ENV_NAME=Framepack_QueueItUp"
+echo === Creating or updating Conda env ===
+
+REM Deactivate any active environment first
+call conda deactivate
+
+REM Remove existing environment if it exists
+call conda env remove -n %ENV_NAME% -y
+
+REM Create new environment
+call conda create --name %ENV_NAME% python=3.10.6 pip=25.0 -y
+if errorlevel 1 (
+    echo ERROR: Failed to create Conda environment
+    pause
+    exit /b 1
+)
 
 echo.
-echo --- Conda env creation finished. Continue Installation press any key---
+echo --- Conda env creation finished ---
 pause
 
 REM 5) Activate the environment
 echo.
-echo === Activating env %ENV_NAME% ===
-call conda activate "%ENV_NAME%"
+echo === Activating environment ===
+call conda activate %ENV_NAME%
 if errorlevel 1 (
-  echo ERROR: could not activate env %ENV_NAME%
+  echo ERROR: could not activate environment
   pause
   exit /b 1
 )
 
-REM 6) Install CUDA + cuDNN (log & pause)
+REM 6) Install CUDA + cuDNN
 echo === Installing CUDA + cuDNN ===
-call conda install -n "%ENV_NAME%" conda-forge::cuda-runtime=12.6 conda-forge::cudnn=9.8.0.87 -y > install_cuda.log 2>&1
+call conda install -n %ENV_NAME% conda-forge::cuda-runtime=12.6 conda-forge::cudnn=9.8.0.87 -y > install_cuda.log 2>&1
 echo log written to install_cuda.log
-echo Continue Installation---
 pause
 
 REM 7) Install PyTorch & friends
@@ -83,9 +118,9 @@ echo ===== Setup Complete! =====
 echo To in the future use: python Framepack_QueueItUp.py --server 127.0.0.1 --inbrowser
 echo or use Framepack_QueueItUp.bat
 echo ...
-echo press any key to start Framepack_QueueItUp
-echo ...
+echo Ready to start Framepack_QueueItUp?
 pause
+
 call Framepack_QueueItUp.bat
 pause
 cmd /k
