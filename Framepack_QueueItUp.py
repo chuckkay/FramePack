@@ -2298,7 +2298,7 @@ def worker(next_job):
                     raise KeyboardInterrupt('User aborts the task.')
                 current_step = d['i'] + 1
                 step_percentage = int(100.0 * current_step / worker_steps)
-                step_desc = f'Step {current_step} of {worker_steps}'
+                step_desc = f'this is Step {current_step} of {worker_steps} for the next chunk of video being created'
                 step_progress = make_progress_bar_html(step_percentage, f'Step Progress: {step_percentage}%')
 
                 current_time = max(0, (total_generated_latent_frames * 4 - 3) / 30)
@@ -2307,9 +2307,9 @@ def worker(next_job):
                 job_desc = f"""Creating a {job_type} job for job name: {worker_job_name}<br>
 Prompt: = {worker_prompt}
 Settings: seed={worker_seed}, cfg scale={worker_gs}, teacache={worker_use_teacache}, mp4_crf={worker_mp4_crf}<br>
-Progress: {current_time:.1f} second(s) of {worker_video_length} second video ({job_percentage}% complete)<br>
+Progress: {current_time:.1f} second(s) of {worker_video_length} second video has been made so far<br>
 Output: {worker_outputs_folder}{worker_job_name}.mp4"""
-                job_progress = make_progress_bar_html(job_percentage, f'Job Progress: {job_percentage}%')
+                job_progress = make_progress_bar_html(job_percentage, f'Job Progress: {job_percentage}% complete')
                 
                 
 
@@ -2848,7 +2848,7 @@ def delete_all_jobs():
 def move_job_to_top(job_name):
     save_queue()
 
-    """Move a job to the top of the queue, maintaining processing job at top"""
+    """Move a job to the top of the queue, maintaining processing jobs at top"""
     try:
         # Find the job's current index
         current_index = None
@@ -2866,12 +2866,23 @@ def move_job_to_top(job_name):
         # Remove from current position
         job_queue.pop(current_index)
         
-        # Find the first non-processing job
+        # Find the appropriate insert position based on job status
         insert_index = 0
-        for i, existing_job in enumerate(job_queue):
-            if existing_job.status != "processing":
-                insert_index = i
-                break
+        if job.status == "pending":
+            # For pending jobs, find the first pending job
+            for i, existing_job in enumerate(job_queue):
+                if existing_job.status == "pending":
+                    insert_index = i
+                    break
+                elif existing_job.status != "processing":
+                    insert_index = i
+                    break
+        else:
+            # For other jobs, find first non-processing job
+            for i, existing_job in enumerate(job_queue):
+                if existing_job.status != "processing":
+                    insert_index = i
+                    break
         
         # Insert the job at the found index
         job_queue.insert(insert_index, job)
@@ -2941,17 +2952,20 @@ def move_job(job_name, direction):
         
         # Calculate new index based on direction and sorting rules
         if direction == 'up':
-            # Find the previous non-processing job
+            # Find the previous valid position
             new_index = current_index - 1
-            while new_index >= 0 and job_queue[new_index].status == "processing":
+            while new_index >= 0:
+                prev_job = job_queue[new_index]
+                # If moving a pending job, can't move above processing or another pending
+                if job.status == "pending":
+                    if prev_job.status in ["processing", "pending"]:
+                        return update_queue_table(), update_queue_display()
+                # If moving any job, can't move above processing
+                elif prev_job.status == "processing":
+                    return update_queue_table(), update_queue_display()
                 new_index -= 1
-            if new_index < 0:
-                return update_queue_table(), update_queue_display()
+            new_index += 1  # Adjust back one step since we went one too far
             
-            # Don't allow moving above processing jobs
-            if job.status == "pending" and job_queue[new_index].status == "processing":
-                return update_queue_table(), update_queue_display()
-                
         else:  # direction == 'down'
             # Find the next non-completed job
             new_index = current_index + 1
@@ -3271,12 +3285,15 @@ def edit_job(job_name, new_prompt, new_n_prompt, new_video_length, new_seed, new
         return update_queue_table(), update_queue_display(), gr.update(visible=False)  # Hide edit group
 
 def delete_completed_jobs():
-    """Delete all completed jobs from the queue"""
+    """Delete all completed jobs from the queue and their associated files"""
     global job_queue
     job_queue = [job for job in job_queue if job.status != "completed"]
     save_queue()
+    # Clean up any orphaned files
+    cleanup_orphaned_files()
+    
+    save_queue()
     debug_print(f"Total jobs in the queue:{len(job_queue)}")
-
     return update_queue_table(), update_queue_display()
 
 def delete_pending_jobs():
@@ -3284,18 +3301,24 @@ def delete_pending_jobs():
     global job_queue
     job_queue = [job for job in job_queue if job.status != "pending"]
     save_queue()
+    # Clean up any orphaned files
+    cleanup_orphaned_files()
+    
+    save_queue()
     debug_print(f"Total jobs in the queue:{len(job_queue)}")
     return update_queue_table(), update_queue_display()
-
 
 def delete_failed_jobs():
     """Delete all failed jobs from the queue"""
     global job_queue
     job_queue = [job for job in job_queue if job.status != "failed"]
     save_queue()
+    # Clean up any orphaned files
+    cleanup_orphaned_files()
+    
+    save_queue()
     debug_print(f"Total jobs in the queue:{len(job_queue)}")
     return update_queue_table(), update_queue_display()
-
 
 def hide_edit_window():
     """Hide the edit window without saving changes"""
@@ -3578,6 +3601,17 @@ with block:
                 delete_pending_button = gr.Button(value="Delete Pending Jobs", interactive=True)
                 delete_failed_button = gr.Button(value="Delete Failed Jobs", interactive=True)
                 delete_all_button = gr.Button(value="Delete All Jobs", interactive=True)
+                load_jobs_button = gr.Button(value="Load Job(s)", interactive=True)
+            
+            # Add accordion for file upload
+            with gr.Accordion("Load Jobs from PNG Files", visible=False, open=True) as load_jobs_accordion:
+                load_jobs_files = gr.File(
+                    label="Only add PNG(s) with job meta data included",
+                    file_types=["png"],
+                    file_count="multiple",
+                    type="filepath"
+                )
+            
             gr.Markdown("Note: Jobs that are Processing are always listed at the top, Jobs that are completed are always at the bottom")
             gr.Markdown("you can edit any job including completed jobs, click the pencil icon make changes and click save, it will switch from completed to pending and can be processed again, if you like the seed check the corresponding job histore json file to grab the seed and change the -1 to the actual seed used")
             # Add edit dialog
@@ -3600,23 +3634,23 @@ with block:
                                 )
                             with gr.Column(scale=1):
                                 cancel_edit_button = gr.Button("Cancel changes")
-                        edit_prompt = gr.Textbox(label="Edit Prompt")
-                        edit_n_prompt = gr.Textbox(label="Edit Negative Prompt")
-                        edit_video_length = gr.Slider(label="Edit Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
-                        edit_seed = gr.Number(label="Edit Seed", value=-1, precision=0)
-                        edit_use_teacache = gr.Checkbox(label='Edit Use TeaCache', value=True)
-                        edit_steps = gr.Slider(label="Edit Steps", minimum=1, maximum=100, value=25, step=1)
-                        edit_cfg = gr.Slider(label="Edit CFG Scale", visible=False, minimum=1.0, maximum=32.0, value=1.0, step=0.01)
-                        edit_gs = gr.Slider(label="Edit Distilled CFG Scale", minimum=1.0, maximum=32.0, value=10.0, step=0.01)
-                        edit_rs = gr.Slider(label="Edit CFG Re-Scale", visible=False, minimum=0.0, maximum=1.0, value=0.0, step=0.01)
-                        edit_gpu_memory = gr.Slider(label="Edit GPU Memory Preservation (GB)", minimum=6, maximum=128, value=6, step=0.1)
-                        edit_mp4_crf = gr.Slider(label="Edit MP4 Compression", minimum=0, maximum=100, value=16, step=1)
-                        edit_keep_temp_png = gr.Checkbox(label="Edit Keep temp PNG", value=False)
-                        edit_keep_temp_json = gr.Checkbox(label="Edit Keep temp JSON", value=False)
-                        edit_outputs_folder = gr.Textbox(label="Edit Outputs Folder - (be careful with this setting as it can cause errors if not set correctly)", value=Config.OUTPUTS_FOLDER)
-                        edit_job_history_folder = gr.Textbox(label="Edit Job History Folder", value=Config.JOB_HISTORY_FOLDER)
-                        edit_keep_temp_mp4 = gr.Checkbox(label="Edit Keep temp MP4", value=Config.KEEP_TEMP_MP4)
-                        edit_keep_completed_job = gr.Checkbox(label="Edit Keep Completed Jobs", value=Config.KEEP_COMPLETED_JOB)
+                        edit_prompt = gr.Textbox(label="Change Prompt")
+                        edit_n_prompt = gr.Textbox(label="Change Negative Prompt")
+                        edit_video_length = gr.Slider(label="Change Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
+                        edit_seed = gr.Number(label="Change Seed", value=-1, precision=0)
+                        edit_use_teacache = gr.Checkbox(label='Change Use TeaCache', value=True)
+                        edit_steps = gr.Slider(label="Change Steps", minimum=1, maximum=100, value=25, step=1)
+                        edit_cfg = gr.Slider(label="Change CFG Scale", visible=False, minimum=1.0, maximum=32.0, value=1.0, step=0.01)
+                        edit_gs = gr.Slider(label="Change Distilled CFG Scale", minimum=1.0, maximum=32.0, value=10.0, step=0.01)
+                        edit_rs = gr.Slider(label="Change CFG Re-Scale", visible=False, minimum=0.0, maximum=1.0, value=0.0, step=0.01)
+                        edit_gpu_memory = gr.Slider(label="Change GPU Memory Preservation (GB)", minimum=6, maximum=128, value=6, step=0.1)
+                        edit_mp4_crf = gr.Slider(label="Change MP4 Compression", minimum=0, maximum=100, value=16, step=1)
+                        edit_keep_temp_png = gr.Checkbox(label="Keep temp PNG", value=False)
+                        edit_keep_temp_json = gr.Checkbox(label="Keep temp JSON", value=False)
+                        edit_outputs_folder = gr.Textbox(label="Change Outputs Folder - (be careful with this setting as it can cause errors if not set correctly)", value=Config.OUTPUTS_FOLDER)
+                        edit_job_history_folder = gr.Textbox(label="Change Job History Folder", value=Config.JOB_HISTORY_FOLDER)
+                        edit_keep_temp_mp4 = gr.Checkbox(label="Keep temp MP4 chunnks", value=Config.KEEP_TEMP_MP4)
+                        edit_keep_completed_job = gr.Checkbox(label="Keep Completed Jobs", value=Config.KEEP_COMPLETED_JOB)
 
             queue_table = gr.DataFrame(
                 headers=None,
@@ -4028,6 +4062,13 @@ with block:
         outputs=[queue_table, queue_display]
     )
 
+    # Add Load Jobs button connections
+    load_jobs_button.click(
+        fn=lambda: gr.update(visible=True),
+        outputs=[load_jobs_accordion]
+    )
+
+
     delete_completed_button.click(
         fn=delete_completed_jobs,
         inputs=[],
@@ -4229,5 +4270,84 @@ def restore_model_default(model_type):
         )
     except Exception as e:
         return f"Error restoring {model_type} default: {str(e)}", None, None, None, None, None, None, None, None
+
+def load_jobs_from_pngs(files):
+    """Load jobs from PNG files with metadata"""
+    if not files:
+        return gr.update(visible=False), update_queue_table(), update_queue_display()
+        
+    jobs_added = 0
+    for file in files:
+        try:
+            # Open the PNG file and read metadata
+            img = Image.open(file)
+            metadata = img.info
+            
+            if not metadata:
+                debug_print(f"No metadata found in {file}")
+                continue
+                
+            # Extract job parameters from metadata
+            prompt = metadata.get("prompt", "")
+            n_prompt = metadata.get("n_prompt", "")
+            job_name = metadata.get("job_name", "")
+            video_length = float(metadata.get("video_length", Config.DEFAULT_VIDEO_LENGTH))
+            seed = int(metadata.get("seed", Config.DEFAULT_SEED))
+            use_teacache = metadata.get("use_teacache", "True").lower() == "true"
+            gpu_memory = float(metadata.get("gpu_memory", Config.DEFAULT_GPU_MEMORY))
+            steps = int(metadata.get("steps", Config.DEFAULT_STEPS))
+            cfg = float(metadata.get("cfg", Config.DEFAULT_CFG))
+            gs = float(metadata.get("gs", Config.DEFAULT_GS))
+            rs = float(metadata.get("rs", Config.DEFAULT_RS))
+            mp4_crf = int(metadata.get("mp4_crf", Config.DEFAULT_MP4_CRF))
+            keep_temp_png = metadata.get("keep_temp_png", "False").lower() == "true"
+            keep_temp_json = metadata.get("keep_temp_json", "False").lower() == "true"
+            
+            # Convert image to numpy array
+            input_image = np.array(img)
+            
+            # Add job to queue
+            job_name = add_to_queue(
+                prompt=prompt,
+                n_prompt=n_prompt,
+                input_image=input_image,
+                video_length=video_length,
+                seed=seed,
+                job_name=job_name,
+                use_teacache=use_teacache,
+                gpu_memory=gpu_memory,
+                steps=steps,
+                cfg=cfg,
+                gs=gs,
+                rs=rs,
+                mp4_crf=mp4_crf,
+                keep_temp_png=keep_temp_png,
+                keep_temp_json=keep_temp_json,
+                status="pending"
+            )
+            
+            if job_name:
+                jobs_added += 1
+                debug_print(f"Added job {job_name} from {file}")
+            
+        except Exception as e:
+            alert_print(f"Error loading job from {file}: {str(e)}")
+            traceback.print_exc()
+            continue
+    
+    info_print(f"Added {jobs_added} jobs from PNG files")
+    return gr.update(visible=False), update_queue_table(), update_queue_display()
+
+# Add this after the UI components are defined
+load_jobs_button.click(
+    fn=lambda: gr.update(visible=True),
+    outputs=[load_jobs_accordion]
+)
+
+load_jobs_files.change(
+    fn=load_jobs_from_pngs,
+    inputs=[load_jobs_files],
+    outputs=[load_jobs_accordion, queue_table, queue_display]
+)
 
 
