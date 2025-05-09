@@ -1,10 +1,5 @@
-import sys
-import asyncio
 
-if sys.platform.startswith("win"):
-    # Use the selector event loop to avoid Proactor pipe-shutdown errors
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-import cv2
+
 from diffusers_helper.hf_login import login
 import os
 import re
@@ -17,6 +12,12 @@ import uuid
 import configparser
 import ast
 import random
+import sys
+import asyncio
+
+if sys.platform.startswith("win"):
+    # Use the selector event loop to avoid Proactor pipe-shutdown errors
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 import gradio as gr
 import torch
 import traceback
@@ -2456,31 +2457,44 @@ def create_still_frame_video(image_path, output_path):
         temp_png = output_path + "_temp.png"
         cv2.imwrite(temp_png, img)
         
-        # FFmpeg command to create video directly from the image
-        ffmpeg_cmd = [
-            'ffmpeg', '-y',
-            '-loop', '1',  # Loop the input
-            '-i', temp_png,  # Input image
-            '-t', '1',  # Duration in seconds
-            '-r', '30',  # Frame rate
-            '-c:v', 'libx264',  # Use H.264 codec
-            '-preset', 'medium',  # Encoding speed preset
-            '-tune', 'stillimage',  # Optimize for still image
-            '-pix_fmt', 'yuv420p',  # Required for compatibility
-            '-movflags', '+faststart',  # Enable fast start
-            output_path
-        ]
-        
-        # Run ffmpeg
-        result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
-        
-        # Clean up temp file
-        if os.path.exists(temp_png):
-            os.remove(temp_png)
+        try:
+            # FFmpeg command to create video directly from the image
+            ffmpeg_cmd = [
+                'ffmpeg', '-y',
+                '-loop', '1',  # Loop the input
+                '-i', temp_png,  # Input image
+                '-t', '1',  # Duration in seconds
+                '-r', '30',  # Frame rate
+                '-c:v', 'libx264',  # Use H.264 codec
+                '-preset', 'medium',  # Encoding speed preset
+                '-tune', 'stillimage',  # Optimize for still image
+                '-pix_fmt', 'yuv420p',  # Required for compatibility
+                '-movflags', '+faststart',  # Enable fast start
+                output_path
+            ]
             
-        return output_path
+            # Run ffmpeg
+            result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+            
+            # Clean up temp file
+            if os.path.exists(temp_png):
+                os.remove(temp_png)
+                
+            return output_path
+            
+        except FileNotFoundError:
+            alert_print("FFmpeg not found. Please install FFmpeg to see the input image preview.")
+            if os.path.exists(temp_png):
+                os.remove(temp_png)
+            return None
+        except subprocess.SubprocessError as e:
+            alert_print(f"FFmpeg error while creating preview video: {str(e)}")
+            if os.path.exists(temp_png):
+                os.remove(temp_png)
+            return None
+            
     except Exception as e:
-        alert_print(f"Error creating still frame video: {str(e)}")
+        alert_print(f"Error creating still frame video preview image: {str(e)}")
         traceback.print_exc()
         return None
 
