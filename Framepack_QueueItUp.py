@@ -1,3 +1,10 @@
+import sys
+import asyncio
+
+if sys.platform.startswith("win"):
+    # Use the selector event loop to avoid Proactor pipe-shutdown errors
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    
 from diffusers_helper.hf_login import login
 import os
 import re
@@ -1415,16 +1422,13 @@ def create_thumbnail(job, status_change=False):
         # Try to load arial font, fall back to default if not available
         try:
             font = ImageFont.truetype("arial.ttf", 16)
-            small_font = ImageFont.truetype("arial.ttf", 12)
         except (OSError, IOError):
             try:
                 # DejaVuSans ships with Pillow and is usually available
                 font = ImageFont.truetype("DejaVuSans.ttf", 16)
-                small_font = ImageFont.truetype("DejaVuSans.ttf", 12)
             except (OSError, IOError):
                 # Final fallback to a simple built-in bitmap font
                 font = ImageFont.load_default()
-                small_font = ImageFont.load_default()
 
         # Handle text-to-video case (job.image_path is text2video)
         if job.image_path == "text2video":
@@ -2138,7 +2142,6 @@ def worker(next_job):
     worker_keep_temp_mp4 = next_job.keep_temp_mp4 if hasattr(next_job, 'keep_temp_mp4') else Config.KEEP_TEMP_MP4
     worker_keep_completed_job = next_job.keep_completed_job if hasattr(next_job, 'keep_completed_job') else Config.KEEP_COMPLETED_JOB
 
-
     if worker_keep_temp_json:
         job_params = {
             'prompt': worker_prompt,
@@ -2179,8 +2182,6 @@ def worker(next_job):
 
     total_latent_sections = (worker_video_length * 30) / (worker_latent_window_size * 4)
     total_latent_sections = int(max(round(total_latent_sections), 1))
-    # job_failed = None not used yet
-    # job_id = generate_timestamp() #not used yet
     debug_print(f"Worker - Total latent sections to process: {total_latent_sections}")
 
     stream.output_queue.push(('progress', (None, "Initializing...", make_progress_bar_html(0, "Step Progress"), "Starting job...", make_progress_bar_html(0, "Job Progress"))))
@@ -2305,10 +2306,10 @@ def worker(next_job):
                 job_percentage = int((current_time / worker_video_length) * 100)
                 job_type = "Image to Video" if next_job.image_path != "text2video" else "Text 2 Video"
                 job_desc = f"""Creating a {job_type} job for job name: {worker_job_name}<br>
-Prompt: = {worker_prompt}
-Settings: seed={worker_seed}, cfg scale={worker_gs}, teacache={worker_use_teacache}, mp4_crf={worker_mp4_crf}<br>
-Progress: {current_time:.1f} second(s) of {worker_video_length} second video has been made so far<br>
-Output: {worker_outputs_folder}{worker_job_name}.mp4"""
+Prompt:        {worker_prompt}
+Settings:      seed={worker_seed}, cfg scale={worker_gs}, teacache={worker_use_teacache}, mp4_crf={worker_mp4_crf}<br>
+Progress:      {current_time:.1f} second(s) of {worker_video_length} second video has been made so far<br>
+Output folder: {worker_outputs_folder}{worker_job_name}.mp4"""
                 job_progress = make_progress_bar_html(job_percentage, f'Job Progress: {job_percentage}% complete')
                 
                 
@@ -2401,7 +2402,7 @@ Output: {worker_outputs_folder}{worker_job_name}.mp4"""
             
 def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=0):
     mp4_path = output_filename
-    status_overlay = "RUNNING" if next_job.status=="processing" else "DONE" if next_job.status=="completed" else next_job.status.upper()
+    status_overlay = "PROCESSING" if next_job.status=="processing" else "DONE" if next_job.status=="completed" else next_job.status.upper()
     status_color = {
         "pending": (0, 255, 255),  # BGR for yellow
         "processing": (255, 0, 0),  # BGR for blue
@@ -2444,7 +2445,7 @@ def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=
 
             if next_job.status == "processing":
                 text1 = f"{job_percentage}%"
-                text2 = "RUNNING"
+                text2 = "PROCESSED"
                 
                 # Calculate text sizes for both lines
                 (text1_w, text1_h), _ = cv2.getTextSize(text1, font, scale, thickness)
@@ -2656,9 +2657,9 @@ def process():
                         None,  # preview_image
                         gr.update(output_filename),  # show result_video with final file
                         "No more pending jobs to process",  # progress_desc1 (step progress)
-                        make_progress_bar_html(100, "Complete"),  # progress_bar1 (step progress)
+                        None,  # progress_bar1 (step progress)
                         "Job Finished Successfully",    # progress_desc2 (job progress)
-                        make_progress_bar_html(100, "Complete"),  # progress_bar2 (job progress)
+                        None,  # progress_bar2 (job progress)
                         update_queue_display(),        # queue_display
                         update_queue_table()         # queue_table
                     )
@@ -2858,7 +2859,7 @@ def move_job_to_top(job_name):
                 break
         
         if current_index is None:
-            return update_queue_table(), update_queue_display()
+            return
         
         # Get the job
         job = job_queue[current_index]
@@ -2888,11 +2889,9 @@ def move_job_to_top(job_name):
         job_queue.insert(insert_index, job)
         save_queue()
         
-        return update_queue_table(), update_queue_display()
     except Exception as e:
         alert_print(f"Error moving job to top: {str(e)}")
         traceback.print_exc()
-        return update_queue_table(), update_queue_display()
 
 def move_job_to_bottom(job_name):
     save_queue()
@@ -2907,7 +2906,7 @@ def move_job_to_bottom(job_name):
                 break
         
         if current_index is None:
-            return update_queue_table(), update_queue_display()
+            return
         
         # Get the job
         job = job_queue[current_index]
@@ -2926,11 +2925,9 @@ def move_job_to_bottom(job_name):
         job_queue.insert(insert_index, job)
         save_queue()
         
-        return update_queue_table(), update_queue_display()
     except Exception as e:
         alert_print(f"Error moving job to bottom: {str(e)}")
         traceback.print_exc()
-        return update_queue_table(), update_queue_display()
 
 def move_job(job_name, direction):
     save_queue()
@@ -2945,49 +2942,49 @@ def move_job(job_name, direction):
                 break
         
         if current_index is None:
-            return update_queue_table(), update_queue_display()
+            return
         
         # Get the job
         job = job_queue[current_index]
         
         # Calculate new index based on direction and sorting rules
         if direction == 'up':
-            # Find the previous valid position
+            if current_index == 0:  # Already at top
+                return
+                
+            # Get the job above
+            prev_job = job_queue[current_index - 1]
+            
+            # Check movement rules
+            # No jobs can move above processing jobs
+            if prev_job.status == "processing":
+                return
+                
+            # Move is allowed - swap positions
             new_index = current_index - 1
-            while new_index >= 0:
-                prev_job = job_queue[new_index]
-                # If moving a pending job, can't move above processing or another pending
-                if job.status == "pending":
-                    if prev_job.status in ["processing", "pending"]:
-                        return update_queue_table(), update_queue_display()
-                # If moving any job, can't move above processing
-                elif prev_job.status == "processing":
-                    return update_queue_table(), update_queue_display()
-                new_index -= 1
-            new_index += 1  # Adjust back one step since we went one too far
             
         else:  # direction == 'down'
-            # Find the next non-completed job
-            new_index = current_index + 1
-            while new_index < len(job_queue) and job_queue[new_index].status == "completed":
-                new_index += 1
-            if new_index >= len(job_queue):
-                return update_queue_table(), update_queue_display()
+            if current_index >= len(job_queue) - 1:  # Already at bottom
+                return
+                
+            # Get the job below
+            next_job = job_queue[current_index + 1]
             
             # Don't allow moving below completed jobs
-            if job.status == "pending" and job_queue[new_index].status == "completed":
-                return update_queue_table(), update_queue_display()
+            if job.status == "pending" and next_job.status == "completed":
+                return
+                
+            # Move is allowed - swap positions
+            new_index = current_index + 1
         
-        # Remove from current position and insert at new position
+        # Perform the move
         job_queue.pop(current_index)
         job_queue.insert(new_index, job)
         save_queue()
         
-        return update_queue_table(), update_queue_display()
     except Exception as e:
         alert_print(f"Error moving job: {str(e)}")
         traceback.print_exc()
-        return update_queue_table(), update_queue_display()
 
 def remove_job(job_name):
     """Delete a job from the queue and its associated files"""
@@ -3004,11 +3001,9 @@ def remove_job(job_name):
                 break
         save_queue()
         debug_print(f"Total jobs in the queue:{len(job_queue)}")
-        return update_queue_table(), update_queue_display()
     except Exception as e:
         alert_print(f"Error deleting job: {str(e)}")
         traceback.print_exc()
-        return update_queue_table(), update_queue_display()
 
 def handle_queue_action(evt: gr.SelectData):
     """Handle queue action button clicks"""
@@ -3032,7 +3027,9 @@ def handle_queue_action(evt: gr.SelectData):
         None,  # keep_temp_mp4
         None,  # keep_completed_job
         "",  # job_name
-        gr.update(visible=False)  # edit group visibility
+        gr.update(visible=False),  # edit group visibility
+        gr.update(),  # queue_table
+        gr.update()   # queue_display
     )
 
     if evt.index is None or evt.value not in ["⏫️", "⬆️", "⬇️", "⏬️", "❌", "📋", "✎"]:
@@ -3045,22 +3042,22 @@ def handle_queue_action(evt: gr.SelectData):
     # Handle actions that don't need job values
     if button_clicked == "⏫️":
         move_job_to_top(job.job_name)
-        return empty_values
+        return *empty_values[:-2], update_queue_table(), update_queue_display()
     elif button_clicked == "⬆️":
         move_job(job.job_name, 'up')
-        return empty_values
+        return *empty_values[:-2], update_queue_table(), update_queue_display()
     elif button_clicked == "⬇️":
         move_job(job.job_name, 'down')
-        return empty_values
+        return *empty_values[:-2], update_queue_table(), update_queue_display()
     elif button_clicked == "⏬️":
         move_job_to_bottom(job.job_name)
-        return empty_values
+        return *empty_values[:-2], update_queue_table(), update_queue_display()
     elif button_clicked == "❌":
         remove_job(job.job_name)
-        return empty_values
+        return *empty_values[:-2], update_queue_table(), update_queue_display()
     elif button_clicked == "📋":
         copy_job(job.job_name)
-        return empty_values
+        return *empty_values[:-2], update_queue_table(), update_queue_display()
     
     # Handle edit action
     elif button_clicked == "✎":
@@ -3084,7 +3081,9 @@ def handle_queue_action(evt: gr.SelectData):
                 job.keep_temp_mp4,
                 job.keep_completed_job,
                 job.job_name,
-                gr.update(visible=True)
+                gr.update(visible=True),
+                gr.update(),  # queue_table
+                gr.update()   # queue_display
             )
     
     return empty_values
@@ -3095,7 +3094,7 @@ def copy_job(job_name):
         # Find the job
         original_job = next((j for j in job_queue if j.job_name == job_name), None)
         if not original_job:
-            return update_queue_table(), update_queue_display()
+            return
             
         # Create a new job ID by keeping the prefix and adding a new hex suffix
         prefix = original_job.job_name.rsplit('_', 1)[0]  # Get everything before the last underscore
@@ -3141,17 +3140,13 @@ def copy_job(job_name):
         if new_image_path:
             new_job.thumbnail = create_thumbnail(new_job, status_change=True)
 
-
         mark_job_pending(new_job)
         save_queue()
         debug_print(f"Total jobs in the queue:{len(job_queue)}")
         
-        return update_queue_table(), update_queue_display()
-        
     except Exception as e:
         alert_print(f"Error copying job: {str(e)}")
         traceback.print_exc()
-        return update_queue_table(), update_queue_display()
 
 css = make_progress_bar_css() + """
 .gradio-gallery-container {
@@ -3300,10 +3295,8 @@ def delete_pending_jobs():
     """Delete all pending jobs from the queue"""
     global job_queue
     job_queue = [job for job in job_queue if job.status != "pending"]
-    save_queue()
     # Clean up any orphaned files
     cleanup_orphaned_files()
-    
     save_queue()
     debug_print(f"Total jobs in the queue:{len(job_queue)}")
     return update_queue_table(), update_queue_display()
@@ -3312,10 +3305,8 @@ def delete_failed_jobs():
     """Delete all failed jobs from the queue"""
     global job_queue
     job_queue = [job for job in job_queue if job.status != "failed"]
-    save_queue()
     # Clean up any orphaned files
     cleanup_orphaned_files()
-    
     save_queue()
     debug_print(f"Total jobs in the queue:{len(job_queue)}")
     return update_queue_table(), update_queue_display()
@@ -4049,17 +4040,15 @@ with block:
             edit_mp4_crf,
             edit_keep_temp_png,
             edit_keep_temp_json,
-            edit_outputs_folder,      # Added
-            edit_job_history_folder,  # Added
-            edit_keep_temp_mp4,       # Added
-            edit_keep_completed_job, # Added
+            edit_outputs_folder,
+            edit_job_history_folder,
+            edit_keep_temp_mp4,
+            edit_keep_completed_job,
             edit_job_name,
-            edit_group
+            edit_group,
+            queue_table,
+            queue_display
         ]
-    ).then(
-        fn=lambda: (update_queue_table(), update_queue_display()),
-        inputs=[],
-        outputs=[queue_table, queue_display]
     )
 
     # Add Load Jobs button connections
