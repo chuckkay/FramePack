@@ -4,7 +4,7 @@ import asyncio
 if sys.platform.startswith("win"):
     # Use the selector event loop to avoid Proactor pipe-shutdown errors
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    
+import cv2
 from diffusers_helper.hf_login import login
 import os
 import re
@@ -2299,7 +2299,7 @@ def worker(next_job):
                     raise KeyboardInterrupt('User aborts the task.')
                 current_step = d['i'] + 1
                 step_percentage = int(100.0 * current_step / worker_steps)
-                step_desc = f'this is Step {current_step} of {worker_steps} for the next chunk of video being created'
+                step_desc = f'this is Step {current_step} of {worker_steps} in processing the next chunk of video.'
                 step_progress = make_progress_bar_html(step_percentage, f'Step Progress: {step_percentage}%')
 
                 current_time = max(0, (total_generated_latent_frames * 4 - 3) / 30)
@@ -2398,8 +2398,93 @@ Output folder: {worker_outputs_folder}{worker_job_name}.mp4"""
     stream.output_queue.push(('done', completed_job))
 
 # where was this          mp4_path = output_filename
+
+
+def create_still_frame_video(image_path, output_path):
+    """Convert a still image into a single-frame MP4 video, or create text2video start frame"""
+    try:
+        if image_path == "text2video":
+            # Create black background image
+            img = np.zeros((512, 512, 3), dtype=np.uint8)  # Black background
+            text = "TEXT TO VIDEO\nCONVERSION HAS BEGUN"
+        else:
+            # Read the input image
+            img = cv2.imread(image_path)
+            if img is None:
+                raise ValueError(f"Failed to read image: {image_path}")
+            text = "INPUT IMAGE TO VIDEO\nCONVERSION HAS BEGUN"
             
+        # Get image dimensions
+        height, width = img.shape[:2]
+        
+        # Add text overlay
+        font = cv2.FONT_HERSHEY_DUPLEX
+        font_scale = min(width, height) * 0.002  # Scale font based on image size
+        thickness = 2
+        color = (0, 255, 255)  # Yellow in BGR
+        
+        # Split text into lines
+        lines = text.split('\n')
+        
+        # Get size of each line
+        line_sizes = [cv2.getTextSize(line, font, font_scale, thickness)[0] for line in lines]
+        line_heights = [size[1] for size in line_sizes]
+        max_line_width = max(size[0] for size in line_sizes)
+        total_text_height = sum(line_heights) + (len(lines) - 1) * 10  # 10 pixels between lines
+        
+        # Calculate starting Y position to center text block
+        y_start = (height - total_text_height) // 2
+        
+        # Draw each line with black border
+        for i, line in enumerate(lines):
+            # Calculate x position to center this line
+            text_size = line_sizes[i]
+            x = (width - text_size[0]) // 2
+            y = y_start + sum(line_heights[:i+1]) + i * 10
             
+            # Draw black border
+            for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1)]:
+                cv2.putText(img, line, (x+dx, y+dy), font, font_scale, (0,0,0), thickness+1, cv2.LINE_AA)
+            
+            # Draw yellow text
+            cv2.putText(img, line, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
+        
+        # Use ffmpeg directly to create the video
+        import subprocess
+        
+        # Create a temporary PNG for ffmpeg input
+        temp_png = output_path + "_temp.png"
+        cv2.imwrite(temp_png, img)
+        
+        # FFmpeg command to create video directly from the image
+        ffmpeg_cmd = [
+            'ffmpeg', '-y',
+            '-loop', '1',  # Loop the input
+            '-i', temp_png,  # Input image
+            '-t', '1',  # Duration in seconds
+            '-r', '30',  # Frame rate
+            '-c:v', 'libx264',  # Use H.264 codec
+            '-preset', 'medium',  # Encoding speed preset
+            '-tune', 'stillimage',  # Optimize for still image
+            '-pix_fmt', 'yuv420p',  # Required for compatibility
+            '-movflags', '+faststart',  # Enable fast start
+            output_path
+        ]
+        
+        # Run ffmpeg
+        result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+        
+        # Clean up temp file
+        if os.path.exists(temp_png):
+            os.remove(temp_png)
+            
+        return output_path
+    except Exception as e:
+        alert_print(f"Error creating still frame video: {str(e)}")
+        traceback.print_exc()
+        return None
+
+
 def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=0):
     mp4_path = output_filename
     status_overlay = "PROCESSING" if next_job.status=="processing" else "DONE" if next_job.status=="completed" else next_job.status.upper()
@@ -2411,7 +2496,7 @@ def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=
     }.get(next_job.status, (255, 255, 255))  # BGR for white
 
     if os.path.exists(mp4_path):
-        import cv2
+        
 
         cap = cv2.VideoCapture(mp4_path)
         # Seek to the 10th frame (zero-based index 9)
@@ -2485,8 +2570,6 @@ def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=
 
 def process():
     global stream
-    # assert input_image is not None, 'No input image!'
-
     # First check for pending jobs
     pending_jobs = [job for job in job_queue if job.status.lower() == "pending"]
 
@@ -2498,24 +2581,30 @@ def process():
     queue_table_update, queue_display_update = mark_job_processing(pending_job)
     save_queue()
     
+    # Create starting video
+    temp_video_path = os.path.join(temp_queue_images, f"temp_start_{pending_job.job_name}.mp4")
+    starting_image = create_still_frame_video(pending_job.image_path, temp_video_path)
+
+
+
+
     # Start processing
     debug_print(f"Starting worker for job {pending_job.job_name}")
-     # Initial yield - Fixed to include queue_table
+     # Initial yield 
     yield (
         gr.update(interactive=True),      # queue_button
         gr.update(interactive=False),     # start_button
         gr.update(interactive=True),      # abort_button
         None,          # preview_image
-        None,          # result_video
+        gr.update(visible=True, value=starting_image),     # still frame video
         "",                               # progress_desc1
         "",                               # progress_bar1
         "",     # progress_desc2
         "",                               # progress_bar2
         update_queue_display(),           # queue_display
         update_queue_table()              # queue_table
-    ) 
+    )
     
-
     stream = AsyncStream()    
     async_run(worker, pending_job)    ###### the first run is needed to start the stream all later runs will be dunt in the while true loop. pending job is the one that will be processed
 
@@ -2523,28 +2612,14 @@ def process():
     while True:
         try:
             flag, data = stream.output_queue.next()
-            #debug_print(f"Process - After stream.output_queue.next(), got flag: {flag}")
 
             if flag == 'file':
-                debug_print("[DEBUG] Process - Handling file flag")
                 output_filename, job_percentage = data
-                
-                
                 processing_jobs = [job for job in job_queue if job.status.lower() == "processing"]
                 if processing_jobs:
                     file_job = processing_jobs[0]
-                
-                
-                # Ensure path is absolute
-                # if not os.path.isabs(output_filename):
-                    # output_filename = os.path.abspath(output_filename)
-                
-
-
                 extract_thumb_from_processing_mp4(file_job, output_filename, job_percentage)
-                
 
-                
                 yield (
                     gr.update(interactive=True),    # queue_button
                     gr.update(interactive=False),   # start_button
@@ -2558,7 +2633,11 @@ def process():
                     update_queue_display(),         # queue_display
                     update_queue_table()           # queue_table
                 )
-                
+                if os.path.exists(temp_video_path):
+                    try:
+                        os.remove(temp_video_path)
+                    except Exception as e:
+                        debug_print(f"Error removing temp video file {temp_video_path}: {str(e)}")
           #=======================PROGRESS STAGE=============
 
             if flag == 'progress':
@@ -2611,7 +2690,7 @@ def process():
 
             if flag == 'done':
                 completed_job = data
-                print(f"completed job recieved at done flag job name {completed_job.job_name}")
+                debug_print(f"completed job recieved at done flag job name {completed_job.job_name}")
 
 
                 # previous job completed
@@ -2631,12 +2710,17 @@ def process():
                     debug_print(f"now marking next job {next_job.job_name} as processing and preparing to send to worker")    
                     queue_table_update, queue_display_update = mark_job_processing(next_job)
                     save_queue()
+                    
+                    # Create starting video for next job
+                    temp_video_path = os.path.join(temp_queue_images, f"temp_start_{next_job.job_name}.mp4")
+                    starting_image = create_still_frame_video(next_job.image_path, temp_video_path)
+
                     yield (
                         gr.update(interactive=True),      # queue_button
                         gr.update(interactive=False),     # start_button
                         gr.update(interactive=True),      # abort_button
                         None,          # preview_image
-                        None,          # result_video
+                        gr.update(visible=True, value=starting_image),  # still frame video
                         "",          # progress_desc1
                         "",          # progress_bar1
                         "",          # progress_desc2
@@ -2645,7 +2729,6 @@ def process():
                         update_queue_table()             # queue_table
                     )
 
-                    debug_print(f"Starting worker for job {next_job.job_name}")
                     async_run(worker, next_job)
 
                 else:
@@ -3568,7 +3651,7 @@ with block:
                     preview_image = gr.Image(label="Latents", visible=False)
                     progress_desc1 = gr.Markdown('', elem_classes=['no-generating-animation', 'progress-desc'], elem_id="progress_desc1")  # Step progress (X/Y steps)
                     progress_bar1 = gr.HTML('', elem_classes=['no-generating-animation', 'progress-bar'], elem_id="progress_bar1")  # Step progress bar
-                    result_video = gr.Video(label="Finished Frames", autoplay=True, show_share_button=False, height=512, loop=True, visible=False)
+                    result_video = gr.Video(label="Video Output Display", autoplay=True, show_share_button=False, height=512, loop=True, visible=False)
                     progress_desc2 = gr.Markdown('', elem_classes=['no-generating-animation', 'progress-desc'], elem_id="progress_desc2")  # Job progress (X/Y seconds)
                     progress_bar2 = gr.HTML('', elem_classes=['no-generating-animation', 'progress-bar'], elem_id="progress_bar2")  # Job progress bar
 
@@ -4338,5 +4421,9 @@ load_jobs_files.change(
     inputs=[load_jobs_files],
     outputs=[load_jobs_accordion, queue_table, queue_display]
 )
+
+
+
+
 
 
