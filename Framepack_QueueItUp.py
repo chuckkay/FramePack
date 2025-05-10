@@ -1,9 +1,13 @@
-
-
-from diffusers_helper.hf_login import login
 import os
+import sys
+import asyncio
+
+if sys.platform.startswith("win"):
+    # Use the selector event loop to avoid Proactor pipe-shutdown errors
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 import re
 os.environ['HF_HOME'] = os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './hf_download')))
+from diffusers_helper.hf_login import login
 import json
 import traceback
 from dataclasses import dataclass, asdict
@@ -12,12 +16,6 @@ import uuid
 import configparser
 import ast
 import random
-import sys
-import asyncio
-
-if sys.platform.startswith("win"):
-    # Use the selector event loop to avoid Proactor pipe-shutdown errors
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 import gradio as gr
 import torch
 import traceback
@@ -43,6 +41,7 @@ from diffusers_helper.clip_vision import hf_clip_vision_encode
 from diffusers_helper.bucket_tools import find_nearest_bucket
 import shutil
 import cv2
+import subprocess
 
 # After imports, before other functions
 def is_model_downloaded(model_value):
@@ -541,6 +540,7 @@ os.makedirs(temp_queue_images, exist_ok=True)
 YELLOW = '\033[93m'
 RED = '\033[31m'
 GREEN = '\033[92m'
+BLUE = '\033[94m'
 RESET = '\033[0m'
 try:
 # Try to load arial font, fall back to default if not available
@@ -564,6 +564,9 @@ def info_print(message):
     """Print info messages in green color"""
     print(f"{GREEN}[INFO] {message}{RESET}")
 
+def success_print(message):
+    """Print info messages in green color"""
+    print(f"{BLUE}[INFO] {message}{RESET}")
 
 def save_settings(config):
     """Save settings to settings.ini"""
@@ -1422,11 +1425,11 @@ def create_thumbnail(job, status_change=False):
     try:
         # Try to load arial font, fall back to default if not available
         try:
-            font = ImageFont.truetype("arial.ttf", 16)
+            font = ImageFont.truetype("arial.ttf", 20)
         except (OSError, IOError):
             try:
                 # DejaVuSans ships with Pillow and is usually available
-                font = ImageFont.truetype("DejaVuSans.ttf", 16)
+                font = ImageFont.truetype("DejaVuSans.ttf", 20)
             except (OSError, IOError):
                 # Final fallback to a simple built-in bitmap font
                 font = ImageFont.load_default()
@@ -1594,6 +1597,36 @@ def update_queue_table():
             prompt_cell      # Prompt
         ])
     return gr.DataFrame(value=data, visible=True, elem_classes=["gradio-dataframe"])
+
+
+def filter_queue_table(status):
+    """Return a filtered queue table by job status ('completed', 'pending', 'failed', or 'all')."""
+    if status == "all":
+        return update_queue_table()
+    filtered = []
+    for job in job_queue:
+        if job.status == status:
+            if not job.thumbnail or not os.path.exists(job.thumbnail):
+                create_thumbnail(job, status_change=True)
+            try:
+                with open(job.thumbnail, "rb") as img_file:
+                    import base64
+                    img_data = base64.b64encode(img_file.read()).decode()
+                img_md = f'<div style="text-align: center; font-size: 0.8em; color: #666; margin-bottom: 5px;">{job.status}</div><div style="text-align: center; font-size: 0.8em; color: #666;">{job.job_name}</div><div style="text-align: center; font-size: 0.8em; color: #666;">seed: {job.seed}</div><div style="text-align: center; font-size: 0.8em; color: #666;">Length: {job.video_length:.1f}s</div><img src="data:image/png;base64,{img_data}" alt="Input" style="max-width:100px; max-height:100px; display: block; margin: auto; object-fit: contain; transform: scale(0.75); transform-origin: top left;" />'
+            except Exception as e:
+                img_md = ""
+            prompt_cell = f'<span style="white-space: normal; word-wrap: break-word; display: block; width: 100%;">{job.prompt}</span>'
+            edit_button = "✎" if job.status in ["pending", "completed"] else ""
+            top_button = "⏫️"
+            up_button = "⬆️"
+            down_button = "⬇️"
+            bottom_button = "⏬️"
+            remove_button = "❌"
+            copy_button = "📋"
+            filtered.append([
+                img_md, top_button, up_button, down_button, bottom_button, remove_button, copy_button, edit_button, prompt_cell
+            ])
+    return gr.DataFrame(value=filtered, visible=True, elem_classes=["gradio-dataframe"])
 
 def cleanup_orphaned_files():
     print ("Clean up any temp files that don't correspond to jobs in the queue")
@@ -1988,6 +2021,30 @@ def clean_up_temp_mp4png(job):
         except OSError as e:
             alert_print(f"Failed to rename {highest_fname} to {job_name}.mp4: {e}")
 
+def count_jobs_by_status():
+    """Count jobs by their status, ignoring 'processing' and unknown statuses"""
+    counts = {
+        "completed": 0,
+        "pending": 0,
+        "failed": 0,
+        "all": len(job_queue)
+    }
+    for job in job_queue:
+        if job.status in ("completed", "pending", "failed"):
+            counts[job.status] += 1
+    return counts
+
+def update_show_button_labels():
+    """Update the show button labels with current counts"""
+    counts = count_jobs_by_status()
+    return (
+        f"Show {counts['completed']} Completed Jobs",
+        f"Show {counts['pending']} Pending Jobs",
+        f"Show {counts['failed']} Failed Jobs",
+        f"Show All {counts['all']} Jobs"
+    )
+
+
 def mark_job_processing(job):
     #Mark a job as processing and update its thumbnail
     job.status = "processing"
@@ -2143,6 +2200,7 @@ def worker(next_job):
     worker_keep_temp_mp4 = next_job.keep_temp_mp4 if hasattr(next_job, 'keep_temp_mp4') else Config.KEEP_TEMP_MP4
     worker_keep_completed_job = next_job.keep_completed_job if hasattr(next_job, 'keep_completed_job') else Config.KEEP_COMPLETED_JOB
 
+
     if worker_keep_temp_json:
         job_params = {
             'prompt': worker_prompt,
@@ -2183,6 +2241,8 @@ def worker(next_job):
 
     total_latent_sections = (worker_video_length * 30) / (worker_latent_window_size * 4)
     total_latent_sections = int(max(round(total_latent_sections), 1))
+    # job_failed = None not used yet
+    # job_id = generate_timestamp() #not used yet
     debug_print(f"Worker - Total latent sections to process: {total_latent_sections}")
 
     stream.output_queue.push(('progress', (None, "Initializing...", make_progress_bar_html(0, "Step Progress"), "Starting job...", make_progress_bar_html(0, "Job Progress"))))
@@ -2286,8 +2346,6 @@ def worker(next_job):
                 transformer.initialize_teacache(enable_teacache=True, num_steps=worker_steps)
             else:
                 transformer.initialize_teacache(enable_teacache=False)
-
-
             def callback(d):
                 preview = d['denoised']
                 preview = vae_decode_fake(preview)
@@ -2307,11 +2365,11 @@ def worker(next_job):
                 job_percentage = int((current_time / worker_video_length) * 100)
                 job_type = "Image to Video" if next_job.image_path != "text2video" else "Text 2 Video"
                 job_desc = f"""Creating a {job_type} job for job name: {worker_job_name}<br>
-Prompt:        {worker_prompt}
+Prompt:        {worker_prompt}<br>
 Settings:      seed={worker_seed}, cfg scale={worker_gs}, teacache={worker_use_teacache}, mp4_crf={worker_mp4_crf}<br>
 Progress:      {current_time:.1f} second(s) of {worker_video_length} second video has been made so far<br>
 Output folder: {worker_outputs_folder}{worker_job_name}.mp4"""
-                job_progress = make_progress_bar_html(job_percentage, f'Job Progress: {job_percentage}% complete')
+                job_progress = make_progress_bar_html(job_percentage, f'Current Job Progress: {job_percentage}% complete')
                 
                 
 
@@ -2401,19 +2459,20 @@ Output folder: {worker_outputs_folder}{worker_job_name}.mp4"""
 # where was this          mp4_path = output_filename
 
 
+
 def create_still_frame_video(image_path, output_path):
     """Convert a still image into a single-frame MP4 video, or create text2video start frame"""
     try:
         if image_path == "text2video":
             # Create black background image
             img = np.zeros((512, 512, 3), dtype=np.uint8)  # Black background
-            text = "TEXT TO VIDEO\nCONVERSION HAS BEGUN"
+            text = "TEXT TO VIDEO\nCREATION HAS BEGUN\n1st video segment\n will appear here\nwhen step progress\n reaches 100 percent"
         else:
             # Read the input image
             img = cv2.imread(image_path)
             if img is None:
                 raise ValueError(f"Failed to read image: {image_path}")
-            text = "INPUT IMAGE TO VIDEO\nCONVERSION HAS BEGUN"
+            text = "IMAGE TO VIDEO\nCREATION HAS BEGUN\n1st video segment\n will appear here\nwhen step progress\n reaches 100 percent"
             
         # Get image dimensions
         height, width = img.shape[:2]
@@ -2473,8 +2532,14 @@ def create_still_frame_video(image_path, output_path):
                 output_path
             ]
             
-            # Run ffmpeg
-            result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+            # Run ffmpeg with CREATE_NO_WINDOW flag on Windows
+            if sys.platform.startswith('win'):
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True, startupinfo=startupinfo)
+            else:
+                result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
             
             # Clean up temp file
             if os.path.exists(temp_png):
@@ -2510,7 +2575,7 @@ def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=
     }.get(next_job.status, (255, 255, 255))  # BGR for white
 
     if os.path.exists(mp4_path):
-        
+        import cv2
 
         cap = cv2.VideoCapture(mp4_path)
         # Seek to the 10th frame (zero-based index 9)
@@ -2584,6 +2649,7 @@ def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=
 
 def process():
     global stream
+
     # First check for pending jobs
     pending_jobs = [job for job in job_queue if job.status.lower() == "pending"]
 
@@ -2598,9 +2664,6 @@ def process():
     # Create starting video
     temp_video_path = os.path.join(temp_queue_images, f"temp_start_{pending_job.job_name}.mp4")
     starting_image = create_still_frame_video(pending_job.image_path, temp_video_path)
-
-
-
 
     # Start processing
     debug_print(f"Starting worker for job {pending_job.job_name}")
@@ -2619,6 +2682,7 @@ def process():
         update_queue_table()              # queue_table
     )
     
+
     stream = AsyncStream()    
     async_run(worker, pending_job)    ###### the first run is needed to start the stream all later runs will be dunt in the while true loop. pending job is the one that will be processed
 
@@ -2647,6 +2711,7 @@ def process():
                     update_queue_display(),         # queue_display
                     update_queue_table()           # queue_table
                 )
+                print(f"{BLUE}JOB NAME: {file_job.job_name}{RESET} -  {GREEN}Video: {output_filename}{RESET}  - {YELLOW}PROGRESS: {job_percentage} % done{RESET}")
                 if os.path.exists(temp_video_path):
                     try:
                         os.remove(temp_video_path)
@@ -2669,6 +2734,8 @@ def process():
                     update_queue_display(),         # queue_display
                     update_queue_table()           # queue_table
                 )
+
+        
 
 
             if flag == 'abort':
@@ -2743,6 +2810,7 @@ def process():
                         update_queue_table()             # queue_table
                     )
 
+                    debug_print(f"Starting worker for job {next_job.job_name}")
                     async_run(worker, next_job)
 
                 else:
@@ -2924,6 +2992,62 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
             gr.update(interactive=True)   # queue_button (always enabled)
         )
 
+def create_default_settings():
+    """Create default settings.ini file"""
+    config = configparser.ConfigParser()
+    config['Job Defaults'] = {}
+    config['System Defaults'] = {}
+    config['Model Defaults'] = {}
+    save_settings(config)
+
+
+
+
+
+
+def restore_model_default(model_type):
+    """Restore a specific model to its original default in settings.ini"""
+    try:
+        # Get original defaults
+        original_defaults = Config.get_original_defaults()
+        original_value = original_defaults[f'DEFAULT_{model_type.upper()}']
+        
+        config = configparser.ConfigParser()
+        config.read(INI_FILE)
+        
+        if 'Model Defaults' not in config:
+            config['Model Defaults'] = {}
+            
+        # Update the config
+        config['Model Defaults'][f'DEFAULT_{model_type.upper()}'] = repr(original_value)
+        
+        # Save to file
+        with open(INI_FILE, 'w') as f:
+            config.write(f)
+            
+        # Update Config object
+        setattr(Config, f'DEFAULT_{model_type.upper()}', original_value)
+        
+        # Get updated model lists
+        models = get_available_models(include_online=False)
+        
+        # Return status message and individual model lists
+        return (
+            f"{model_type} restored to original default successfully. Restart required for changes to take effect.",
+            models['transformer'],
+            models['text_encoder'],
+            models['text_encoder_2'],
+            models['tokenizer'],
+            models['tokenizer_2'],
+            models['vae'],
+            models['feature_extractor'],
+            models['image_encoder']
+        )
+    except Exception as e:
+        return f"Error restoring {model_type} default: {str(e)}", None, None, None, None, None, None, None, None
+
+
+
 def delete_all_jobs():
     """Delete all jobs from the queue and their associated files"""
     try:
@@ -2946,7 +3070,7 @@ def delete_all_jobs():
 def move_job_to_top(job_name):
     save_queue()
 
-    """Move a job to the top of the queue, maintaining processing jobs at top"""
+    """Move a job to the top of the queue, maintaining processing job at top"""
     try:
         # Find the job's current index
         current_index = None
@@ -2956,7 +3080,7 @@ def move_job_to_top(job_name):
                 break
         
         if current_index is None:
-            return
+            return# update_queue_table(), update_queue_display()
         
         # Get the job
         job = job_queue[current_index]
@@ -2986,9 +3110,11 @@ def move_job_to_top(job_name):
         job_queue.insert(insert_index, job)
         save_queue()
         
+        # return update_queue_table(), update_queue_display()
     except Exception as e:
         alert_print(f"Error moving job to top: {str(e)}")
         traceback.print_exc()
+        # return update_queue_table(), update_queue_display()
 
 def move_job_to_bottom(job_name):
     save_queue()
@@ -3003,7 +3129,7 @@ def move_job_to_bottom(job_name):
                 break
         
         if current_index is None:
-            return
+            return# update_queue_table(), update_queue_display()
         
         # Get the job
         job = job_queue[current_index]
@@ -3022,9 +3148,11 @@ def move_job_to_bottom(job_name):
         job_queue.insert(insert_index, job)
         save_queue()
         
+        # return update_queue_table(), update_queue_display()
     except Exception as e:
         alert_print(f"Error moving job to bottom: {str(e)}")
         traceback.print_exc()
+        # return update_queue_table(), update_queue_display()
 
 def move_job(job_name, direction):
     save_queue()
@@ -3039,7 +3167,7 @@ def move_job(job_name, direction):
                 break
         
         if current_index is None:
-            return
+            return# update_queue_table(), update_queue_display()
         
         # Get the job
         job = job_queue[current_index]
@@ -3079,9 +3207,11 @@ def move_job(job_name, direction):
         job_queue.insert(new_index, job)
         save_queue()
         
+        # return update_queue_table(), update_queue_display()
     except Exception as e:
         alert_print(f"Error moving job: {str(e)}")
         traceback.print_exc()
+        # return update_queue_table(), update_queue_display()
 
 def remove_job(job_name):
     """Delete a job from the queue and its associated files"""
@@ -3098,11 +3228,13 @@ def remove_job(job_name):
                 break
         save_queue()
         debug_print(f"Total jobs in the queue:{len(job_queue)}")
+        # return update_queue_table(), update_queue_display()
     except Exception as e:
         alert_print(f"Error deleting job: {str(e)}")
         traceback.print_exc()
+        # return update_queue_table(), update_queue_display()
 
-def handle_queue_action(evt: gr.SelectData):
+def handle_queue_action(evt: gr.SelectData, filter_status):
     """Handle queue action button clicks"""
     # Default empty return values
     empty_values = (
@@ -3134,27 +3266,58 @@ def handle_queue_action(evt: gr.SelectData):
     
     row_index, col_index = evt.index
     button_clicked = evt.value
-    job = job_queue[row_index]
+    filtered_jobs = job_queue if filter_status == "all" else [job for job in job_queue if job.status == filter_status]
+    if row_index >= len(filtered_jobs):
+        return empty_values
+    filtered_job = filtered_jobs[row_index]
+    # Find the job in the full queue using job_name
+    job = next((j for j in job_queue if j.job_name == filtered_job.job_name), None)
+    if not job:
+        return empty_values
     
     # Handle actions that don't need job values
     if button_clicked == "⏫️":
         move_job_to_top(job.job_name)
-        return *empty_values[:-2], update_queue_table(), update_queue_display()
+        if filter_status == "all":
+            table = update_queue_table()
+        else:
+            table = filter_queue_table(filter_status)
+        return *empty_values[:-2], table, update_queue_display(), filter_status
     elif button_clicked == "⬆️":
         move_job(job.job_name, 'up')
-        return *empty_values[:-2], update_queue_table(), update_queue_display()
+        if filter_status == "all":
+            table = update_queue_table()
+        else:
+            table = filter_queue_table(filter_status)
+        return *empty_values[:-2], table, update_queue_display(), filter_status
     elif button_clicked == "⬇️":
         move_job(job.job_name, 'down')
-        return *empty_values[:-2], update_queue_table(), update_queue_display()
+        if filter_status == "all":
+            table = update_queue_table()
+        else:
+            table = filter_queue_table(filter_status)
+        return *empty_values[:-2], table, update_queue_display(), filter_status
     elif button_clicked == "⏬️":
         move_job_to_bottom(job.job_name)
-        return *empty_values[:-2], update_queue_table(), update_queue_display()
+        if filter_status == "all":
+            table = update_queue_table()
+        else:
+            table = filter_queue_table(filter_status)
+        return *empty_values[:-2], table, update_queue_display(), filter_status
     elif button_clicked == "❌":
         remove_job(job.job_name)
-        return *empty_values[:-2], update_queue_table(), update_queue_display()
+        if filter_status == "all":
+            table = update_queue_table()
+        else:
+            table = filter_queue_table(filter_status)
+        return *empty_values[:-2], table, update_queue_display(), filter_status
     elif button_clicked == "📋":
         copy_job(job.job_name)
-        return *empty_values[:-2], update_queue_table(), update_queue_display()
+        if filter_status == "all":
+            table = update_queue_table()
+        else:
+            table = filter_queue_table(filter_status)
+        return *empty_values[:-2], table, update_queue_display(), filter_status
     
     # Handle edit action
     elif button_clicked == "✎":
@@ -3178,12 +3341,30 @@ def handle_queue_action(evt: gr.SelectData):
                 job.keep_temp_mp4,
                 job.keep_completed_job,
                 job.job_name,
-                gr.update(visible=True),
-                gr.update(),  # queue_table
-                gr.update()   # queue_display
+                gr.update(visible=True),  # Show edit_job_group
+                filter_queue_table(filter_status),
+                update_queue_display(),
+                filter_status
             )
     
     return empty_values
+def generate_new_job_name(old_job_name):
+    """Helper function to generate new job name while preserving the prefix"""
+    # Find the last separator (either hyphen or underscore)
+    hyphen_index = old_job_name.rfind('-')
+    underscore_index = old_job_name.rfind('_')
+    last_separator_index = max(hyphen_index, underscore_index)
+    
+    if last_separator_index > 0:
+        # Keep everything before the last separator
+        prefix = old_job_name[:last_separator_index]
+    else:
+        # If no separator found, use the whole name as prefix
+        prefix = old_job_name
+        
+    # Generate new hex and add with hyphen
+    new_hex = uuid.uuid4().hex[:8]
+    return f"{prefix}-{new_hex}"
 
 def copy_job(job_name):
     """Create a copy of a job and insert it below the original"""
@@ -3194,8 +3375,8 @@ def copy_job(job_name):
             return
             
         # Create a new job ID by keeping the prefix and adding a new hex suffix
-        prefix = original_job.job_name.rsplit('_', 1)[0]  # Get everything before the last underscore
-        new_job_name = f"{prefix}_{uuid.uuid4().hex[:8]}"
+        # Get prefix and generate new job name
+        new_job_name = generate_new_job_name(original_job.job_name.rsplit('-', 1)[0])
         
         # Copy the image file
         if os.path.exists(original_job.image_path):
@@ -3285,43 +3466,33 @@ css = make_progress_bar_css() + """
 }
 
 /* Fix widths for action columns */
+.gradio-dataframe th:nth-child(1) { width: 200px !important; max-width: 200px !important; padding: 0 !important; text-align: center !important;}
+
+/* Fix widths for action columns */
 .gradio-dataframe th:nth-child(2),
-.gradio-dataframe td:nth-child(2),
 .gradio-dataframe th:nth-child(3),
-.gradio-dataframe td:nth-child(3),
 .gradio-dataframe th:nth-child(4),
-.gradio-dataframe td:nth-child(4),
 .gradio-dataframe th:nth-child(5),
-.gradio-dataframe td:nth-child(5),
 .gradio-dataframe th:nth-child(6),
-.gradio-dataframe td:nth-child(6) {
-    width: 42px !important;
-    min-width: 42px !important;
-    max-width: 42px !important;
+.gradio-dataframe th:nth-child(7),
+.gradio-dataframe td:nth-child(8) {
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
     text-align: center !important;
     padding: 0 !important;
 }
-
-/* Fix width for prompt column */
-.gradio-dataframe th:last-child,
-.gradio-dataframe td:last-child {
-    width: 300px !important;
-    min-width: 200px !important;
-    max-width: 400px !important;
-    text-align: left !important;
-    white-space: normal !important;
-    word-break: break-word !important;
-}
-
-/* Restore DataFrame child column widths for prompt and others */
-.gradio-dataframe th:nth-child(7) { width:  80px !important; min-width:  80px !important; }
-.gradio-dataframe th:nth-child(8) { width:  60px !important; min-width:  60px !important; }
 .gradio-dataframe th:nth-child(9) { width: 300px !important; min-width: 300px !important; text-align: left !important; }
-.gradio-dataframe th:nth-child(10){ width:  60px !important; min-width:  60px !important; }
+
+
+
 """
 
 
-def edit_job(job_name, new_prompt, new_n_prompt, new_video_length, new_seed, new_use_teacache, new_gpu_memory, new_steps, new_cfg, new_gs, new_rs, new_mp4_crf, new_keep_temp_png, new_keep_temp_json, new_outputs_folder, new_job_history_folder, new_keep_temp_mp4, new_keep_completed_job):
+def edit_job(
+    job_name, prompt, n_prompt, video_length, seed, use_teacache, gpu_memory, steps, cfg, gs, rs,
+    mp4_crf, keep_temp_png, keep_temp_json, outputs_folder, job_history_folder, keep_temp_mp4, keep_completed_job
+):
     """Edit a job's parameters"""
     try:
         # Find the job
@@ -3332,23 +3503,23 @@ def edit_job(job_name, new_prompt, new_n_prompt, new_video_length, new_seed, new
                     return update_queue_table(), update_queue_display(), gr.update(visible=False)
 
                 # Update job parameters
-                job.prompt = new_prompt
-                job.n_prompt = new_n_prompt
-                job.video_length = new_video_length
-                job.seed = new_seed
-                job.use_teacache = new_use_teacache
-                job.gpu_memory = new_gpu_memory
-                job.steps = new_steps
-                job.cfg = new_cfg
-                job.gs = new_gs
-                job.rs = new_rs
-                job.mp4_crf = new_mp4_crf
-                job.keep_temp_png = new_keep_temp_png
-                job.keep_temp_json = new_keep_temp_json
-                job.outputs_folder = new_outputs_folder
-                job.job_history_folder = new_job_history_folder
-                job.keep_temp_mp4 = new_keep_temp_mp4
-                job.keep_completed_job = new_keep_completed_job
+                job.prompt = prompt
+                job.n_prompt = n_prompt
+                job.video_length = video_length
+                job.seed = seed
+                job.use_teacache = use_teacache
+                job.gpu_memory = gpu_memory
+                job.steps = steps
+                job.cfg = cfg
+                job.gs = gs
+                job.rs = rs
+                job.mp4_crf = mp4_crf
+                job.keep_temp_png = keep_temp_png
+                job.keep_temp_json = keep_temp_json
+                job.outputs_folder = outputs_folder
+                job.job_history_folder = job_history_folder
+                job.keep_temp_mp4 = keep_temp_mp4
+                job.keep_completed_job = keep_completed_job
             
                 # If job was completed, change to pending and move it
                 if job.status == "completed":
@@ -3375,7 +3546,6 @@ def edit_job(job_name, new_prompt, new_n_prompt, new_video_length, new_seed, new
         alert_print(f"Error editing job: {str(e)}")
         traceback.print_exc()
         return update_queue_table(), update_queue_display(), gr.update(visible=False)  # Hide edit group
-
 def delete_completed_jobs():
     """Delete all completed jobs from the queue and their associated files"""
     global job_queue
@@ -3603,6 +3773,215 @@ def restore_all_model_defaults():
         return f"Error restoring model defaults: {str(e)}", None, None, None, None, None, None, None, None
         
 
+def enable_edit_button(file_path):
+    """Enable edit button if a file is loaded and has metadata"""
+    if not file_path:
+        return gr.update(interactive=False, value="add an image above")
+    
+    try:
+        with Image.open(file_path) as img:
+            metadata = img.info
+            required_fields = ["prompt", "video_length", "seed"]
+            has_metadata = any(field in metadata for field in required_fields)
+            
+            if not has_metadata:
+                debug_print(f"Image lacks required metadata fields: {file_path}")
+                return gr.update(interactive=False, value="No metadata found")
+            
+            return gr.update(interactive=True, value="view/edit then savejob settings")
+    except Exception as e:
+        debug_print(f"Error checking metadata: {str(e)}")
+        return gr.update(interactive=False, value="Error reading file")
+
+def prepare_job_edit(file_path):
+    """Save image to temp folder and read metadata"""
+    import time
+    if not file_path:
+        return (
+            gr.update(visible=False),  # edit_group
+            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, 
+            Config.OUTPUTS_FOLDER, Config.JOB_HISTORY_FOLDER, Config.KEEP_TEMP_MP4, 
+            Config.KEEP_COMPLETED_JOB, ""
+        )
+    try:
+        # Create a copy of the file first to avoid race conditions
+        temp_input = os.path.join(temp_queue_images, "temp_input.png")
+        import shutil
+
+        # Retry logic for copying the file
+        for attempt in range(5):
+            try:
+                shutil.copy2(file_path, temp_input)
+                break
+            except Exception as e:
+                if attempt == 4:
+                    raise
+                time.sleep(0.1)
+
+        # Retry logic for opening the image
+        for attempt in range(5):
+            try:
+                with Image.open(temp_input) as orig_img:
+                    metadata = orig_img.info.copy()  # Make a copy of the metadata
+
+                    # Check if image has required metadata
+                    required_fields = ["prompt", "video_length", "seed"]
+                    has_metadata = any(field in metadata for field in required_fields)
+
+                    if not has_metadata:
+                        debug_print(f"Image lacks required metadata fields: {file_path}")
+                        if os.path.exists(temp_input):
+                            os.remove(temp_input)
+                        return (
+                            gr.update(visible=False),  # edit_group
+                            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, 
+                            Config.OUTPUTS_FOLDER, Config.JOB_HISTORY_FOLDER, Config.KEEP_TEMP_MP4, 
+                            Config.KEEP_COMPLETED_JOB, ""
+                        )
+
+                    # Convert to RGB if needed and make a copy
+                    if orig_img.mode == 'RGBA':
+                        img = orig_img.convert('RGB')
+                    else:
+                        img = orig_img.copy()
+                break
+            except Exception as e:
+                if attempt == 4:
+                    raise
+                time.sleep(0.1)
+
+        # Save image with metadata preserved
+        temp_path = os.path.join(temp_queue_images, "meta_loaded_image.png")
+        pnginfo = PngInfo()
+        for key, value in metadata.items():
+            try:
+                pnginfo.add_text(key, str(value))
+            except Exception as e:
+                debug_print(f"Error adding metadata key {key}: {str(e)}")
+                continue
+
+        try:
+            img.save(temp_path, pnginfo=pnginfo)
+        finally:
+            img.close()
+            # Clean up temporary input file
+            if os.path.exists(temp_input):
+                os.remove(temp_input)
+
+        # Helper functions for safe type conversion
+        def safe_float(val, default):
+            try:
+                return float(str(val).strip())
+            except (ValueError, TypeError):
+                return default
+
+        def safe_int(val, default):
+            try:
+                return int(float(str(val).strip()))
+            except (ValueError, TypeError):
+                return default
+
+        def safe_bool(val, default=True):
+            if isinstance(val, str):
+                return val.lower() in ('true', 't', 'yes', 'y', '1')
+            return bool(val) if val is not None else default
+
+        # Return values to populate edit frame
+        return (
+            gr.update(visible=True),  # edit_group
+            str(metadata.get("prompt", "")),
+            str(metadata.get("n_prompt", "")),
+            safe_float(metadata.get("video_length"), Config.DEFAULT_VIDEO_LENGTH),
+            safe_int(metadata.get("seed"), Config.DEFAULT_SEED),
+            safe_bool(metadata.get("use_teacache"), Config.DEFAULT_USE_TEACACHE),
+            safe_float(metadata.get("gpu_memory"), Config.DEFAULT_GPU_MEMORY),
+            safe_int(metadata.get("steps"), Config.DEFAULT_STEPS),
+            safe_float(metadata.get("cfg"), Config.DEFAULT_CFG),
+            safe_float(metadata.get("gs"), Config.DEFAULT_GS),
+            safe_float(metadata.get("rs"), Config.DEFAULT_RS),
+            safe_int(metadata.get("mp4_crf"), Config.DEFAULT_MP4_CRF),
+            safe_bool(metadata.get("keep_temp_png"), Config.DEFAULT_KEEP_TEMP_PNG),
+            safe_bool(metadata.get("keep_temp_json"), Config.DEFAULT_KEEP_TEMP_JSON),
+            Config.OUTPUTS_FOLDER,
+            Config.JOB_HISTORY_FOLDER,
+            Config.KEEP_TEMP_MP4,
+            Config.KEEP_COMPLETED_JOB,
+            str(metadata.get("job_name", ""))
+        )
+    except Exception as e:
+        debug_print(f"Error preparing job edit: {str(e)}")
+        traceback.print_exc()
+        # Clean up any temporary files
+        for temp_file in ["temp_input.png", "meta_loaded_image.png"]:
+            try:
+                temp_path = os.path.join(temp_queue_images, temp_file)
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except:
+                pass
+        return (
+            gr.update(visible=False),  # edit_group
+            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False,
+            Config.OUTPUTS_FOLDER, Config.JOB_HISTORY_FOLDER, Config.KEEP_TEMP_MP4,
+            Config.KEEP_COMPLETED_JOB, ""
+        )
+    
+def save_loaded_job(
+    prompt, n_prompt, video_length, seed, use_teacache, gpu_memory, steps, cfg, gs, rs, 
+    mp4_crf, keep_temp_png, keep_temp_json, outputs_folder, job_history_folder, 
+    keep_temp_mp4, keep_completed_job, job_name
+):
+    temp_path = os.path.join(temp_queue_images, "meta_loaded_image.png")
+    if os.path.exists(temp_path):
+        img = np.array(Image.open(temp_path))
+        job_name = add_to_queue(
+            prompt=prompt,
+            n_prompt=n_prompt,
+            input_image=img,
+            video_length=video_length,
+            seed=seed,
+            job_name=job_name if job_name else "Job",
+            use_teacache=use_teacache,
+            gpu_memory=gpu_memory,
+            steps=steps,
+            cfg=cfg,
+            gs=gs,
+            rs=rs,
+            mp4_crf=mp4_crf,
+            keep_temp_png=keep_temp_png,
+            keep_temp_json=keep_temp_json,
+            create_job_outputs_folder=outputs_folder,
+            create_job_history_folder=job_history_folder,
+            keep_temp_mp4=keep_temp_mp4,
+            create_job_keep_completed_job=keep_completed_job,
+            status="pending"
+        )
+        save_queue()
+        try:
+            os.remove(temp_path)
+        except:
+            pass
+    return (
+        gr.update(visible=False),  # edit_group
+        None,  # clear file upload
+        gr.update(visible=False),  # load_metadata_job_group
+        update_queue_table(),
+        update_queue_display()
+    )
+
+def cancel_loaded_job():
+    temp_path = os.path.join(temp_queue_images, "meta_loaded_image.png")
+    try:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    except:
+        pass
+    return (
+        gr.update(visible=False),  # edit_group
+        None,  # clear file upload
+        gr.update(visible=False)  # load_metadata_job_group
+    )
+
 block = gr.Blocks(css=css).queue()
 with block:
    
@@ -3637,7 +4016,7 @@ with block:
                     with gr.Group():
                         use_teacache = gr.Checkbox(label='Use TeaCache', value=Config.DEFAULT_USE_TEACACHE, info='Faster speed, but often makes hands and fingers slightly worse.')
                         seed = gr.Number(label="Seed use -1 to create random seed for job", value=Config.DEFAULT_SEED, precision=0)
-                        job_name = gr.Textbox(label="Job Name (optional prefix)", value=Config.DEFAULT_JOB_NAME, info=f"Optional prefix name for this job you can enter source_image_filename or date_time or blank will defaut to Job-")
+                        job_name = gr.Textbox(label="Job Name (optional prefix)", value=Config.DEFAULT_JOB_NAME, info=f"Optional prefix name for this job (comming soon you can enter source_image_filename or date_time) or blank will defaut to Job-")
                         create_job_outputs_folder = gr.Textbox(label="Job Outputs Folder", value=Config.OUTPUTS_FOLDER, info="The path Where the output video for this job will be saved, the default directory is displayed below, optional to change, but a bad path will cause an error.")
                         create_job_history_folder = gr.Textbox(label="Job History Folder", value=Config.JOB_HISTORY_FOLDER, info="The path Where the job history will be saved, the default directory is displayed below, optional to change, but a bad path will cause an error.")
                         video_length = gr.Slider(label="Total Video Length (Seconds)", minimum=1, maximum=120, value=Config.DEFAULT_VIDEO_LENGTH, step=0.1)
@@ -3663,10 +4042,10 @@ with block:
 
                     gr.Markdown('Note: video previews will appear here once you click start.')
                     preview_image = gr.Image(label="Latents", visible=False)
-                    progress_desc1 = gr.Markdown('', elem_classes=['no-generating-animation', 'progress-desc'], elem_id="progress_desc1")  # Step progress (X/Y steps)
-                    progress_bar1 = gr.HTML('', elem_classes=['no-generating-animation', 'progress-bar'], elem_id="progress_bar1")  # Step progress bar
+                    progress_desc1 = gr.Markdown('', elem_classes=['no-generating-animation', 'progress-desc'], elem_id="progress_desc1")  # Job Step progress text
+                    progress_bar1 = gr.HTML('', elem_classes=['no-generating-animation', 'progress-bar'], elem_id="progress_bar1")  # Job Step progress bar
                     result_video = gr.Video(label="Video Output Display", autoplay=True, show_share_button=False, height=512, loop=True, visible=False)
-                    progress_desc2 = gr.Markdown('', elem_classes=['no-generating-animation', 'progress-desc'], elem_id="progress_desc2")  # Job progress (X/Y seconds)
+                    progress_desc2 = gr.Markdown('', elem_classes=['no-generating-animation', 'progress-desc'], elem_id="progress_desc2")  # Job progress text
                     progress_bar2 = gr.HTML('', elem_classes=['no-generating-animation', 'progress-bar'], elem_id="progress_bar2")  # Job progress bar
 
 
@@ -3683,63 +4062,81 @@ with block:
                     
 
         with gr.Tab("Edit jobs in the Queue"):
-            gr.Markdown("### Queuing Order")
             with gr.Row():
+                metadata_job_button = gr.Button(value="Upload a metadata Image from job History", interactive=True)
+            # Add file upload section
+            with gr.Group(visible=True) as load_metadata_job_group:
+                load_metadata_job = gr.Image(
+                    sources='upload',
+                    visible=False,
+                    type="filepath",
+                    label="add an image that has job metadata",
+                    height=320
+                )
+                edit_metadata_job_button = gr.Button("add an image that has metadata above", visible=False, interactive=False)
+            # --- Refactored metadata job edit group ---
+            with gr.Group(visible=False) as edit_metadata_job_group:
+                with gr.Row():
+                    save_edit_metadata_job_button = gr.Button("Save Loaded Job")
+                    cancel_edit_metadata_job_button = gr.Button("Cancel")
+                edit_metadata_job_prompt = gr.Textbox(label="Change Prompt")
+                edit_metadata_job_n_prompt = gr.Textbox(label="Change Negative Prompt")
+                edit_metadata_job_video_length = gr.Slider(label="Change Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
+                edit_metadata_job_seed = gr.Number(label="Change Seed", value=-1, precision=0)
+                edit_metadata_job_use_teacache = gr.Checkbox(label='Change Use TeaCache', value=True)
+                edit_metadata_job_steps = gr.Slider(label="Change Steps", minimum=1, maximum=100, value=25, step=1)
+                edit_metadata_job_cfg = gr.Slider(label="Change CFG Scale", visible=False, minimum=1.0, maximum=32.0, value=1.0, step=0.01)
+                edit_metadata_job_gs = gr.Slider(label="Change Distilled CFG Scale", minimum=1.0, maximum=32.0, value=10.0, step=0.01)
+                edit_metadata_job_rs = gr.Slider(label="Change CFG Re-Scale", visible=False, minimum=0.0, maximum=1.0, value=0.0, step=0.01)
+                edit_metadata_job_gpu_memory = gr.Slider(label="Change GPU Memory Preservation (GB)", minimum=6, maximum=128, value=6, step=0.1)
+                edit_metadata_job_mp4_crf = gr.Slider(label="Change MP4 Compression", minimum=0, maximum=100, value=16, step=1)
+                edit_metadata_job_keep_temp_png = gr.Checkbox(label="Keep temp PNG", value=False)
+                edit_metadata_job_keep_temp_json = gr.Checkbox(label="Keep temp JSON", value=False)
+                edit_metadata_job_outputs_folder = gr.Textbox(label="Change Outputs Folder", value=Config.OUTPUTS_FOLDER)
+                edit_metadata_job_history_folder = gr.Textbox(label="Change Job History Folder", value=Config.JOB_HISTORY_FOLDER)
+                edit_metadata_job_keep_temp_mp4 = gr.Checkbox(label="Keep temp MP4 chunks", value=Config.KEEP_TEMP_MP4)
+                edit_metadata_job_keep_completed_job = gr.Checkbox(label="Keep Completed Jobs", value=Config.KEEP_COMPLETED_JOB)
+                edit_metadata_job_name = gr.Textbox(label="Job ID", visible=False)
+
+
+# adding edit_job_group
+            with gr.Group(visible=False) as edit_job_group:
+                with gr.Row():
+                    save_edit_job_button = gr.Button("Save Changes")
+                    cancel_edit_job_button = gr.Button("Cancel")
+                edit_job_prompt = gr.Textbox(label="Change Prompt")
+                edit_job_n_prompt = gr.Textbox(label="Change Negative Prompt")
+                edit_job_video_length = gr.Slider(label="Change Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
+                edit_job_seed = gr.Number(label="Change Seed", value=-1, precision=0)
+                edit_job_use_teacache = gr.Checkbox(label='Change Use TeaCache', value=True)
+                edit_job_steps = gr.Slider(label="Change Steps", minimum=1, maximum=100, value=25, step=1)
+                edit_job_cfg = gr.Slider(label="Change CFG Scale", visible=False, minimum=1.0, maximum=32.0, value=1.0, step=0.01)
+                edit_job_gs = gr.Slider(label="Change Distilled CFG Scale", minimum=1.0, maximum=32.0, value=10.0, step=0.01)
+                edit_job_rs = gr.Slider(label="Change CFG Re-Scale", visible=False, minimum=0.0, maximum=1.0, value=0.0, step=0.01)
+                edit_job_gpu_memory = gr.Slider(label="Change GPU Memory Preservation (GB)", minimum=6, maximum=128, value=6, step=0.1)
+                edit_job_mp4_crf = gr.Slider(label="Change MP4 Compression", minimum=0, maximum=100, value=16, step=1)
+                edit_job_keep_temp_png = gr.Checkbox(label="Keep temp PNG", value=False)
+                edit_job_keep_temp_json = gr.Checkbox(label="Keep temp JSON", value=False)
+                edit_job_outputs_folder = gr.Textbox(label="Change Outputs Folder", value=Config.OUTPUTS_FOLDER)
+                edit_job_history_folder = gr.Textbox(label="Change Job History Folder", value=Config.JOB_HISTORY_FOLDER)
+                edit_job_keep_temp_mp4 = gr.Checkbox(label="Keep temp MP4 chunks", value=Config.KEEP_TEMP_MP4)
+                edit_job_keep_completed_job = gr.Checkbox(label="Keep Completed Jobs", value=Config.KEEP_COMPLETED_JOB)
+                edit_job_name = gr.Textbox(label="Job ID", visible=False)
+
+
+
+
+
+            with gr.Row():           
                 delete_completed_button = gr.Button(value="Delete Completed Jobs", interactive=True)
                 delete_pending_button = gr.Button(value="Delete Pending Jobs", interactive=True)
                 delete_failed_button = gr.Button(value="Delete Failed Jobs", interactive=True)
-                delete_all_button = gr.Button(value="Delete All Jobs", interactive=True)
-                load_jobs_button = gr.Button(value="Load Job(s)", interactive=True)
-            
-            # Add accordion for file upload
-            with gr.Accordion("Load Jobs from PNG Files", visible=False, open=True) as load_jobs_accordion:
-                load_jobs_files = gr.File(
-                    label="Only add PNG(s) with job meta data included",
-                    file_types=["png"],
-                    file_count="multiple",
-                    type="filepath"
-                )
-            
-            gr.Markdown("Note: Jobs that are Processing are always listed at the top, Jobs that are completed are always at the bottom")
-            gr.Markdown("you can edit any job including completed jobs, click the pencil icon make changes and click save, it will switch from completed to pending and can be processed again, if you like the seed check the corresponding job histore json file to grab the seed and change the -1 to the actual seed used")
-            # Add edit dialog
+                delete_all_button = gr.Button(value="Delete All Jobs", interactive=True, variant="stop")
             with gr.Row():
-                with gr.Column():
-                    edit_job_name = gr.Textbox(label="Job ID", visible=False)
-                    edit_group = gr.Group(visible=False)  # Hidden by default
-                    with edit_group:
-                        with gr.Row():
-                            with gr.Column(scale=1):
-                                save_edit_button = gr.Button("Save Changes")
-                            with gr.Column(scale=1):
-                                dummy_label = gr.HTML(
-                                    '''
-                                    <div style="text-align:center; font-weight:bold;">
-                                        Editing Job<br>
-                                        <span style="font-weight:normal;">Please Click Save or Cancel</span>
-                                    </div>
-                                    '''
-                                )
-                            with gr.Column(scale=1):
-                                cancel_edit_button = gr.Button("Cancel changes")
-                        edit_prompt = gr.Textbox(label="Change Prompt")
-                        edit_n_prompt = gr.Textbox(label="Change Negative Prompt")
-                        edit_video_length = gr.Slider(label="Change Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
-                        edit_seed = gr.Number(label="Change Seed", value=-1, precision=0)
-                        edit_use_teacache = gr.Checkbox(label='Change Use TeaCache', value=True)
-                        edit_steps = gr.Slider(label="Change Steps", minimum=1, maximum=100, value=25, step=1)
-                        edit_cfg = gr.Slider(label="Change CFG Scale", visible=False, minimum=1.0, maximum=32.0, value=1.0, step=0.01)
-                        edit_gs = gr.Slider(label="Change Distilled CFG Scale", minimum=1.0, maximum=32.0, value=10.0, step=0.01)
-                        edit_rs = gr.Slider(label="Change CFG Re-Scale", visible=False, minimum=0.0, maximum=1.0, value=0.0, step=0.01)
-                        edit_gpu_memory = gr.Slider(label="Change GPU Memory Preservation (GB)", minimum=6, maximum=128, value=6, step=0.1)
-                        edit_mp4_crf = gr.Slider(label="Change MP4 Compression", minimum=0, maximum=100, value=16, step=1)
-                        edit_keep_temp_png = gr.Checkbox(label="Keep temp PNG", value=False)
-                        edit_keep_temp_json = gr.Checkbox(label="Keep temp JSON", value=False)
-                        edit_outputs_folder = gr.Textbox(label="Change Outputs Folder - (be careful with this setting as it can cause errors if not set correctly)", value=Config.OUTPUTS_FOLDER)
-                        edit_job_history_folder = gr.Textbox(label="Change Job History Folder", value=Config.JOB_HISTORY_FOLDER)
-                        edit_keep_temp_mp4 = gr.Checkbox(label="Keep temp MP4 chunnks", value=Config.KEEP_TEMP_MP4)
-                        edit_keep_completed_job = gr.Checkbox(label="Keep Completed Jobs", value=Config.KEEP_COMPLETED_JOB)
-
+                show_completed_button = gr.Button(value="Show 0 Completed Jobs", interactive=True)
+                show_pending_button = gr.Button(value="Show 0 Pending Jobs", interactive=True)
+                show_failed_button = gr.Button(value="Show 0 Failed Jobs", interactive=True)
+                show_all_button = gr.Button(value="Show All 0 Jobs", interactive=True)
             queue_table = gr.DataFrame(
                 headers=None,
                 datatype=["markdown","str","str","str","str","str","str","str","markdown"],
@@ -3748,9 +4145,9 @@ with block:
                 interactive=False,
                 visible=True,
                 elem_classes=["gradio-dataframe"],
-                # Optionally, set max_rows or height if available in your Gradio version
+                max_height=600
             )
-
+            current_filter = gr.State("all")  # default to show all jobs
 
         with gr.Tab("Settings"):
             with gr.Tabs():
@@ -4060,12 +4457,27 @@ with block:
                                 ]
                             )
 
-
-
-    save_job_defaults_button.click(
-        fn=save_job_defaults_from_ui,
-        inputs=[prompt, n_prompt, use_teacache, seed, job_name, video_length, steps, cfg, gs, rs, gpu_memory, mp4_crf, keep_temp_png, keep_temp_json],
-        outputs=[gr.Markdown()]
+    # Update show button labels when queue changes
+    queue_table.change(
+        fn=update_show_button_labels,
+        inputs=[],
+        outputs=[show_completed_button, show_pending_button, show_failed_button, show_all_button]
+    )
+    show_completed_button.click(
+        fn=lambda: ("completed", filter_queue_table("completed")),
+        outputs=[current_filter, queue_table]
+    )
+    show_pending_button.click(
+        fn=lambda: ("pending", filter_queue_table("pending")),
+        outputs=[current_filter, queue_table]
+    )
+    show_failed_button.click(
+        fn=lambda: ("failed", filter_queue_table("failed")),
+        outputs=[current_filter, queue_table]
+    )
+    show_all_button.click(
+        fn=lambda: ("all", filter_queue_table("all")),
+        outputs=[current_filter, queue_table]
     )
 
     restore_job_defaults_button.click(
@@ -4122,38 +4534,75 @@ with block:
     # Connect queue actions
     queue_table.select(
         fn=handle_queue_action,
-        inputs=[],
+        inputs=[current_filter],
         outputs=[
-            edit_prompt,
-            edit_n_prompt,
-            edit_video_length,
-            edit_seed,
-            edit_use_teacache,
-            edit_gpu_memory,
-            edit_steps,
-            edit_cfg,
-            edit_gs,
-            edit_rs,
-            edit_mp4_crf,
-            edit_keep_temp_png,
-            edit_keep_temp_json,
-            edit_outputs_folder,
+            edit_job_prompt,
+            edit_job_n_prompt,
+            edit_job_video_length,
+            edit_job_seed,
+            edit_job_use_teacache,
+            edit_job_gpu_memory,
+            edit_job_steps,
+            edit_job_cfg,
+            edit_job_gs,
+            edit_job_rs,
+            edit_job_mp4_crf,
+            edit_job_keep_temp_png,
+            edit_job_keep_temp_json,
+            edit_job_outputs_folder,
             edit_job_history_folder,
-            edit_keep_temp_mp4,
-            edit_keep_completed_job,
+            edit_job_keep_temp_mp4,
+            edit_job_keep_completed_job,
             edit_job_name,
-            edit_group,
+            edit_job_group,
             queue_table,
-            queue_display
+            queue_display,
+            current_filter  # Add this to persist the filter
         ]
     )
 
     # Add Load Jobs button connections
-    load_jobs_button.click(
-        fn=lambda: gr.update(visible=True),
-        outputs=[load_jobs_accordion]
+    metadata_job_button.click(
+        fn=lambda: (gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)),
+        outputs=[load_metadata_job_group, load_metadata_job, edit_metadata_job_button]
     )
 
+    # Only enable/disable edit button when file changes
+    load_metadata_job.change(
+        fn=enable_edit_button,
+        inputs=[load_metadata_job],
+        outputs=[edit_metadata_job_button]
+    )
+
+    # Show edit group and populate with metadata when edit button clicked
+    edit_metadata_job_button.click(
+        fn=prepare_job_edit,
+        inputs=[load_metadata_job],
+        outputs=[
+            edit_metadata_job_group, edit_metadata_job_prompt, edit_metadata_job_n_prompt, edit_metadata_job_video_length, edit_metadata_job_seed,
+            edit_metadata_job_use_teacache, edit_metadata_job_gpu_memory, edit_metadata_job_steps, edit_metadata_job_cfg, edit_metadata_job_gs,
+            edit_metadata_job_rs, edit_metadata_job_mp4_crf, edit_metadata_job_keep_temp_png, edit_metadata_job_keep_temp_json,
+            edit_metadata_job_outputs_folder, edit_metadata_job_history_folder, edit_metadata_job_keep_temp_mp4,
+            edit_metadata_job_keep_completed_job, edit_metadata_job_name
+        ]
+    )
+
+    save_edit_metadata_job_button.click(
+        fn=save_loaded_job,
+        inputs=[
+            edit_metadata_job_prompt, edit_metadata_job_n_prompt, edit_metadata_job_video_length, edit_metadata_job_seed, edit_metadata_job_use_teacache,
+            edit_metadata_job_gpu_memory, edit_metadata_job_steps, edit_metadata_job_cfg, edit_metadata_job_gs, edit_metadata_job_rs, edit_metadata_job_mp4_crf,
+            edit_metadata_job_keep_temp_png, edit_metadata_job_keep_temp_json, edit_metadata_job_outputs_folder,
+            edit_metadata_job_history_folder, edit_metadata_job_keep_temp_mp4, edit_metadata_job_keep_completed_job,
+            edit_metadata_job_name
+        ],
+        outputs=[edit_metadata_job_group, load_metadata_job, load_metadata_job_group, queue_table, queue_display]
+    )
+
+    cancel_edit_metadata_job_button.click(
+        fn=cancel_loaded_job,
+        outputs=[edit_metadata_job_group, load_metadata_job, load_metadata_job_group]
+    )
 
     delete_completed_button.click(
         fn=delete_completed_jobs,
@@ -4176,34 +4625,34 @@ with block:
         inputs=[],
         outputs=[queue_table, queue_display]
     )
-    save_edit_button.click(
+    save_edit_job_button.click(
         fn=edit_job,
         inputs=[
             edit_job_name, 
-            edit_prompt, 
-            edit_n_prompt, 
-            edit_video_length, 
-            edit_seed, 
-            edit_use_teacache, 
-            edit_gpu_memory, 
-            edit_steps, 
-            edit_cfg, 
-            edit_gs, 
-            edit_rs, 
-            edit_mp4_crf, 
-            edit_keep_temp_png, 
-            edit_keep_temp_json,
-            edit_outputs_folder,      # Added
-            edit_job_history_folder,  # Added
-            edit_keep_temp_mp4,       # Added
-            edit_keep_completed_job  # Added
+            edit_job_prompt, 
+            edit_job_n_prompt, 
+            edit_job_video_length, 
+            edit_job_seed, 
+            edit_job_use_teacache, 
+            edit_job_gpu_memory, 
+            edit_job_steps, 
+            edit_job_cfg, 
+            edit_job_gs, 
+            edit_job_rs, 
+            edit_job_mp4_crf, 
+            edit_job_keep_temp_png, 
+            edit_job_keep_temp_json,
+            edit_job_outputs_folder,
+            edit_job_history_folder,
+            edit_job_keep_temp_mp4,
+            edit_job_keep_completed_job
         ],
-        outputs=[queue_table, queue_display, edit_group]
+        outputs=[queue_table, queue_display, edit_job_group]
     )
 
-    cancel_edit_button.click(
+    cancel_edit_job_button.click(
         fn=hide_edit_window,
-        outputs=[edit_group]
+        outputs=[edit_job_group]
     )
 
     job_data = [input_image, prompt, n_prompt, seed, video_length, latent_window_size, steps, cfg, gs, rs, gpu_memory, use_teacache, mp4_crf, keep_temp_png, keep_temp_json]
@@ -4227,6 +4676,17 @@ with block:
     )
 
 
+
+
+
+
+
+
+
+
+
+
+
     queue_button.click(
         fn=add_to_queue_handler,
         inputs=[
@@ -4239,6 +4699,29 @@ with block:
             create_job_keep_completed_job
         ],
         outputs=[queue_table, queue_display, queue_button]
+    )
+
+    block.load(
+        fn=lambda: (
+            gr.update(interactive=True),      # queue_button
+            gr.update(interactive=True),      # start_button
+            gr.update(interactive=False),     # abort_button
+            gr.update(visible=False),         # preview_image
+            gr.update(visible=False),         # result_video
+            "",                               # progress_desc1
+            "",                               # progress_bar1
+            "",                               # progress_desc2
+            "",                               # progress_bar2
+            update_queue_display(),           # queue_display
+            update_queue_table()              # queue_table
+        ),
+        outputs=[
+            queue_button, start_button, abort_button,
+            preview_image, result_video,
+            progress_desc1, progress_bar1,
+            progress_desc2, progress_bar2,
+            queue_display, queue_table
+        ]
     )
 
 # Add these calls at startup
@@ -4280,161 +4763,10 @@ gr.HTML(
     """
 )
 
-def create_default_settings():
-    """Create default settings.ini file"""
-    config = configparser.ConfigParser()
-    config['Job Defaults'] = {}
-    config['System Defaults'] = {}
-    config['Model Defaults'] = {}
-    save_settings(config)
-
-
-
-block.load(
-    fn=lambda: (
-        gr.update(interactive=True),      # queue_button
-        gr.update(interactive=True),      # start_button
-        gr.update(interactive=False),     # abort_button
-        gr.update(visible=False),         # preview_image
-        gr.update(visible=False),         # result_video
-        "",                               # progress_desc1
-        "",                               # progress_bar1
-        "",                               # progress_desc2
-        "",                               # progress_bar2
-        update_queue_display(),           # queue_display
-        update_queue_table()              # queue_table
-    ),
-    outputs=[
-        queue_button, start_button, abort_button,
-        preview_image, result_video,
-        progress_desc1, progress_bar1,
-        progress_desc2, progress_bar2,
-        queue_display, queue_table
-    ]
-)
 
 
 # End of file
 
-def restore_model_default(model_type):
-    """Restore a specific model to its original default in settings.ini"""
-    try:
-        # Get original defaults
-        original_defaults = Config.get_original_defaults()
-        original_value = original_defaults[f'DEFAULT_{model_type.upper()}']
-        
-        config = configparser.ConfigParser()
-        config.read(INI_FILE)
-        
-        if 'Model Defaults' not in config:
-            config['Model Defaults'] = {}
-            
-        # Update the config
-        config['Model Defaults'][f'DEFAULT_{model_type.upper()}'] = repr(original_value)
-        
-        # Save to file
-        with open(INI_FILE, 'w') as f:
-            config.write(f)
-            
-        # Update Config object
-        setattr(Config, f'DEFAULT_{model_type.upper()}', original_value)
-        
-        # Get updated model lists
-        models = get_available_models(include_online=False)
-        
-        # Return status message and individual model lists
-        return (
-            f"{model_type} restored to original default successfully. Restart required for changes to take effect.",
-            models['transformer'],
-            models['text_encoder'],
-            models['text_encoder_2'],
-            models['tokenizer'],
-            models['tokenizer_2'],
-            models['vae'],
-            models['feature_extractor'],
-            models['image_encoder']
-        )
-    except Exception as e:
-        return f"Error restoring {model_type} default: {str(e)}", None, None, None, None, None, None, None, None
-
-def load_jobs_from_pngs(files):
-    """Load jobs from PNG files with metadata"""
-    if not files:
-        return gr.update(visible=False), update_queue_table(), update_queue_display()
-        
-    jobs_added = 0
-    for file in files:
-        try:
-            # Open the PNG file and read metadata
-            img = Image.open(file)
-            metadata = img.info
-            
-            if not metadata:
-                debug_print(f"No metadata found in {file}")
-                continue
-                
-            # Extract job parameters from metadata
-            prompt = metadata.get("prompt", "")
-            n_prompt = metadata.get("n_prompt", "")
-            job_name = metadata.get("job_name", "")
-            video_length = float(metadata.get("video_length", Config.DEFAULT_VIDEO_LENGTH))
-            seed = int(metadata.get("seed", Config.DEFAULT_SEED))
-            use_teacache = metadata.get("use_teacache", "True").lower() == "true"
-            gpu_memory = float(metadata.get("gpu_memory", Config.DEFAULT_GPU_MEMORY))
-            steps = int(metadata.get("steps", Config.DEFAULT_STEPS))
-            cfg = float(metadata.get("cfg", Config.DEFAULT_CFG))
-            gs = float(metadata.get("gs", Config.DEFAULT_GS))
-            rs = float(metadata.get("rs", Config.DEFAULT_RS))
-            mp4_crf = int(metadata.get("mp4_crf", Config.DEFAULT_MP4_CRF))
-            keep_temp_png = metadata.get("keep_temp_png", "False").lower() == "true"
-            keep_temp_json = metadata.get("keep_temp_json", "False").lower() == "true"
-            
-            # Convert image to numpy array
-            input_image = np.array(img)
-            
-            # Add job to queue
-            job_name = add_to_queue(
-                prompt=prompt,
-                n_prompt=n_prompt,
-                input_image=input_image,
-                video_length=video_length,
-                seed=seed,
-                job_name=job_name,
-                use_teacache=use_teacache,
-                gpu_memory=gpu_memory,
-                steps=steps,
-                cfg=cfg,
-                gs=gs,
-                rs=rs,
-                mp4_crf=mp4_crf,
-                keep_temp_png=keep_temp_png,
-                keep_temp_json=keep_temp_json,
-                status="pending"
-            )
-            
-            if job_name:
-                jobs_added += 1
-                debug_print(f"Added job {job_name} from {file}")
-            
-        except Exception as e:
-            alert_print(f"Error loading job from {file}: {str(e)}")
-            traceback.print_exc()
-            continue
-    
-    info_print(f"Added {jobs_added} jobs from PNG files")
-    return gr.update(visible=False), update_queue_table(), update_queue_display()
-
-# Add this after the UI components are defined
-load_jobs_button.click(
-    fn=lambda: gr.update(visible=True),
-    outputs=[load_jobs_accordion]
-)
-
-load_jobs_files.change(
-    fn=load_jobs_from_pngs,
-    inputs=[load_jobs_files],
-    outputs=[load_jobs_accordion, queue_table, queue_display]
-)
 
 
 
