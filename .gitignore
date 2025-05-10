@@ -1,4 +1,4 @@
-
+.env/
 hf_download/
 outputs/
 job_history/
@@ -8,8 +8,10 @@ oldversions/
 repo/
 job_queue.json
 quick_prompts.json
+status.json
 settings.ini
 install_cuda.log
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
