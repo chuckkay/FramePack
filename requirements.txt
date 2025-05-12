@@ -16,3 +16,4 @@ huggingface-hub>=0.19.0
 torch>=2.0.0
 decord==0.6.0
 imageio_ffmpeg==0.6.0
+peft

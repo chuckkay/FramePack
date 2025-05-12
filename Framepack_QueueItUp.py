@@ -29,7 +29,6 @@ from PIL.PngImagePlugin import PngInfo
 from diffusers import AutoencoderKLHunyuanVideo
 from transformers import LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer
 from diffusers_helper.hunyuan import encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake
-# from diffusers_helper.load_lora import load_lora
 from diffusers_helper.utils import save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw, resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge, generate_timestamp
 from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
 from diffusers_helper.pipelines.k_diffusion_hunyuan import sample_hunyuan
@@ -42,6 +41,7 @@ from diffusers_helper.bucket_tools import find_nearest_bucket
 import shutil
 import cv2
 import subprocess
+from peft import PeftModel, PeftConfig
 
 # After imports, before other functions
 def is_model_downloaded(model_value):
@@ -295,6 +295,17 @@ def download_model_from_huggingface(model_id):
         alert_print(f"Error in download process: {str(e)}")
         traceback.print_exc()
         return None
+
+def load_lora_to_transformer(transformer, lora_path, lora_weight=1.0):
+    from safetensors.torch import load_file as load_safetensors
+    # Load the LoRA weights
+    state_dict = load_safetensors(lora_path)
+    # Assume your transformer has a method to load LoRA (if not, you may need to adapt this)
+    transformer.load_lora_adapter(state_dict, network_alphas=None, adapter_name="lora")
+    # Set the adapter scale (if supported)
+    if hasattr(transformer, "set_adapter_scale"):
+        transformer.set_adapter_scale("lora", lora_weight)
+    return transformer
 
 def get_available_models(include_online=False):
     """Get list of available models from hub directory and optionally from Hugging Face"""
@@ -553,7 +564,7 @@ except:
 
 def debug_print(message):
     """Print debug messages in yellow color"""
-    if debug_mode:
+    if getattr(Config, "DEBUG_MODE", True):
         print(f"{YELLOW}[DEBUG] {message}{RESET}")
     
 def alert_print(message):
@@ -720,7 +731,9 @@ class Config:
             'DEBUG_MODE': False,
             'KEEP_TEMP_MP4': False,
             'KEEP_COMPLETED_JOB': True,
-            'HF_TOKEN': 'add token here'
+            'HF_TOKEN': 'add token here',
+            'DEFAULT_LORA_MODEL': "None",
+            'DEFAULT_LORA_WEIGHT': 1.0,
         }
 
     @classmethod
@@ -1208,15 +1221,18 @@ class QueuedJob:
     gs: float
     rs: float
     n_prompt: str
+    mp4_crf: float
+    lora_weight: float
+    outputs_folder: str = str(Config.OUTPUTS_FOLDER)
+    job_history_folder: str = str(Config.JOB_HISTORY_FOLDER)
     status: str = "pending"
     thumbnail: str = ""
-    mp4_crf: float = 16
     keep_temp_png: bool = False
     keep_temp_json: bool = False
-    outputs_folder: str = str(Config.OUTPUTS_FOLDER)  # Keep original name
-    job_history_folder: str = str(Config.JOB_HISTORY_FOLDER)  # Keep original name
     keep_temp_mp4: bool = Config.KEEP_TEMP_MP4
     keep_completed_job: bool = Config.KEEP_COMPLETED_JOB
+    lora_model: str = "None"
+    source_name: str = ""
 
     def to_dict(self):
         try:
@@ -1241,7 +1257,10 @@ class QueuedJob:
                 'outputs_folder': str(self.outputs_folder),
                 'job_history_folder': str(self.job_history_folder),
                 'keep_temp_mp4': self.keep_temp_mp4,
-                'keep_completed_job': self.keep_completed_job
+                'keep_completed_job': self.keep_completed_job,
+                'lora_model': self.lora_model,
+                'lora_weight': self.lora_weight,
+                'source_name': self.source_name
             }
         except Exception as e:
             alert_print(f"Error converting job to dict: {str(e)}")
@@ -1254,24 +1273,27 @@ class QueuedJob:
                 prompt=data.get('prompt', ''),
                 image_path=data.get('image_path', ''),
                 job_name=data.get('job_name', ''),
-                video_length=float(data.get('video_length', 5.0)),
-                seed=int(data.get('seed', -1)),
-                use_teacache=bool(data.get('use_teacache', True)),
-                gpu_memory=float(data.get('gpu_memory', 6.0)),
-                steps=int(data.get('steps', 25)),
-                cfg=float(data.get('cfg', 1.0)),
-                gs=float(data.get('gs', 10.0)),
-                rs=float(data.get('rs', 0.0)),
+                video_length=float(data.get('video_length', Config.DEFAULT_VIDEO_LENGTH)),
+                seed=int(data.get('seed', Config.DEFAULT_SEED)),
+                use_teacache=bool(data.get('use_teacache', Config.DEFAULT_USE_TEACACHE)),
+                gpu_memory=float(data.get('gpu_memory', Config.DEFAULT_GPU_MEMORY)),
+                steps=int(data.get('steps', Config.DEFAULT_STEPS)),
+                cfg=float(data.get('cfg', Config.DEFAULT_CFG)),
+                gs=float(data.get('gs', Config.DEFAULT_GS)),
+                rs=float(data.get('rs', Config.DEFAULT_RS)),
                 n_prompt=data.get('n_prompt', ''),
                 status=data.get('status', 'pending'),
                 thumbnail=data.get('thumbnail', ''),
-                mp4_crf=float(data.get('mp4_crf', 16)),
-                keep_temp_png=bool(data.get('keep_temp_png', False)),
-                keep_temp_json=bool(data.get('keep_temp_json', False)),
+                mp4_crf=float(data.get('mp4_crf', Config.DEFAULT_MP4_CRF)),
+                keep_temp_png=bool(data.get('keep_temp_png', Config.DEFAULT_KEEP_TEMP_PNG)),
+                keep_temp_json=bool(data.get('keep_temp_json', Config.DEFAULT_KEEP_TEMP_JSON)),
                 outputs_folder=str(data.get('outputs_folder', Config.OUTPUTS_FOLDER)),
                 job_history_folder=str(data.get('job_history_folder', Config.JOB_HISTORY_FOLDER)),
                 keep_temp_mp4=bool(data.get('keep_temp_mp4', Config.KEEP_TEMP_MP4)),
-                keep_completed_job=bool(data.get('keep_completed_job', Config.KEEP_COMPLETED_JOB))
+                keep_completed_job=bool(data.get('keep_completed_job', Config.KEEP_COMPLETED_JOB)),
+                lora_model=data.get('lora_model', Config.DEFAULT_LORA_MODEL),
+                lora_weight=float(data.get('lora_weight', Config.DEFAULT_LORA_WEIGHT)),
+                source_name=data.get('source_name', "")  # Load from dict
             )
         except Exception as e:
             alert_print(f"Error creating job from dict: {str(e)}")
@@ -1308,9 +1330,12 @@ def save_image_to_temp(image: np.ndarray, job_name: str) -> str:
         traceback.print_exc()
         return ""
 
-def add_to_queue(prompt, n_prompt, input_image, video_length, seed, job_name, use_teacache, gpu_memory, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_json, create_job_outputs_folder=None, create_job_history_folder=None, keep_temp_mp4=None, create_job_keep_completed_job=None, status="pending"):
+def add_to_queue(prompt, n_prompt, input_image, video_length, seed, job_name, use_teacache, gpu_memory, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_json, create_job_outputs_folder=None, create_job_history_folder=None, keep_temp_mp4=None, create_job_keep_completed_job=None, status="pending", lora_model="None", lora_weight=0.0, source_name=""):
     """Add a new job to the queue"""
     try:
+        # Ensure lora_model is always a string
+        if not isinstance(lora_model, str):
+            lora_model = "None"
         # Set default values for optional parameters
         if create_job_outputs_folder is None:
             create_job_outputs_folder = Config.OUTPUTS_FOLDER
@@ -1347,7 +1372,10 @@ def add_to_queue(prompt, n_prompt, input_image, video_length, seed, job_name, us
                 outputs_folder=create_job_outputs_folder,  # Map to job's outputs_folder
                 job_history_folder=create_job_history_folder,  # Map to job's job_history_folder
                 keep_temp_mp4=keep_temp_mp4,
-                keep_completed_job=create_job_keep_completed_job  # Map to job's keep_completed_job
+                keep_completed_job=create_job_keep_completed_job,  # Map to job's keep_completed_job
+                lora_model=lora_model,
+                lora_weight=lora_weight,
+                source_name=""  # No source for text-to-video
             )
             # Find the first completed job
             insert_index = len(job_queue)
@@ -1389,7 +1417,10 @@ def add_to_queue(prompt, n_prompt, input_image, video_length, seed, job_name, us
                 outputs_folder=create_job_outputs_folder,  # Map to job's outputs_folder
                 job_history_folder=create_job_history_folder,  # Map to job's job_history_folder
                 keep_temp_mp4=keep_temp_mp4,
-                keep_completed_job=create_job_keep_completed_job  # Map to job's keep_completed_job
+                keep_completed_job=create_job_keep_completed_job,  # Map to job's keep_completed_job
+                lora_model=lora_model,
+                lora_weight=lora_weight,
+                source_name=source_name  # Pass the original basename
             )
             # Find the first completed job
             insert_index = len(job_queue)
@@ -1425,11 +1456,11 @@ def create_thumbnail(job, status_change=False):
     try:
         # Try to load arial font, fall back to default if not available
         try:
-            font = ImageFont.truetype("arial.ttf", 20)
+            font = ImageFont.truetype("arial.ttf", 24)
         except (OSError, IOError):
             try:
                 # DejaVuSans ships with Pillow and is usually available
-                font = ImageFont.truetype("DejaVuSans.ttf", 20)
+                font = ImageFont.truetype("DejaVuSans.ttf", 24)
             except (OSError, IOError):
                 # Final fallback to a simple built-in bitmap font
                 font = ImageFont.load_default()
@@ -1483,7 +1514,7 @@ def create_thumbnail(job, status_change=False):
             
             # Add black outline to make text more readable
             for offset in [(-1,-1), (-1,1), (1,-1), (1,1)]:
-                draw.text((x+offset[0], y+offset[1]), text, font=font, fill=(0,0,0))
+                draw.text((x+offset[0], y+offset[1]), text, font=font, fill=(255,255,255))
             draw.text((x, y), text, fill='red', font=font)
             
             # Save thumbnail
@@ -1914,11 +1945,7 @@ text_encoder_2.requires_grad_(False)
 image_encoder.requires_grad_(False)
 transformer.requires_grad_(False)
 
-# if args.lora:
-    # lora = args.lora
-    # lora_path, lora_name = os.path.split(lora)
-    # print("Loading lora")
-    # transformer = load_lora(transformer, lora_path, lora_name, args.lora_is_diffusers)
+
 
 if not high_vram:
     # DynamicSwapInstaller is same as huggingface's enable_sequential_offload but 3x faster
@@ -2144,6 +2171,7 @@ def mark_job_pending(job):
 
 @torch.no_grad()
 def worker(next_job):
+    global transformer
     """Worker function to process a job"""
     global stream
     # Create job output and history folders if they don't exist
@@ -2215,6 +2243,9 @@ def worker(next_job):
             'gpu_memory': worker_gpu_memory,
             'use_teacache': worker_use_teacache,
             'mp4_crf': worker_mp4_crf,
+            'lora_model': str(getattr(next_job, 'lora_model', 'None')),
+            'lora_weight': float(getattr(next_job, 'lora_weight', 0.0)),
+            'source_name': str(getattr(next_job, 'source_name', ''))
         }
         json_path = os.path.join(worker_job_history_folder, f'{worker_job_name}.json')
         with open(json_path, 'w') as f:
@@ -2224,7 +2255,7 @@ def worker(next_job):
     metadata = PngInfo()
     metadata.add_text("prompt", worker_prompt)
     metadata.add_text("job_name", worker_job_name)
-    metadata.add_text("n_prompt", worker_n_prompt) 
+    metadata.add_text("n_prompt", worker_n_prompt)
     metadata.add_text("seed", str(worker_seed))  # This will now be the random seed if it was -1
     metadata.add_text("video_length", str(worker_video_length))
     metadata.add_text("steps", str(worker_steps))
@@ -2234,6 +2265,9 @@ def worker(next_job):
     metadata.add_text("gpu_memory", str(worker_gpu_memory))
     metadata.add_text("use_teacache", str(worker_use_teacache))
     metadata.add_text("mp4_crf", str(worker_mp4_crf))
+    metadata.add_text("lora_model", str(getattr(next_job, 'lora_model', 'None')))
+    metadata.add_text("lora_weight", str(float(getattr(next_job, 'lora_weight', 0.0))))
+    metadata.add_text("source_name", str(getattr(next_job, 'source_name', '')))
 
     debug_print(f"Starting worker for job {worker_job_name}")
     debug_print(f"Worker - Initial parameters: video_length={worker_video_length}, steps={worker_steps}, seed={worker_seed}")
@@ -2245,9 +2279,14 @@ def worker(next_job):
     # job_id = generate_timestamp() #not used yet
     debug_print(f"Worker - Total latent sections to process: {total_latent_sections}")
 
-    stream.output_queue.push(('progress', (None, "Initializing...", make_progress_bar_html(0, "Step Progress"), "Starting job...", make_progress_bar_html(0, "Job Progress"))))
+    stream.output_queue.push(('progress', (None, "Initializing...", make_progress_bar_html(0, "Step Progress"), "Starting job...")))
     debug_print("Worker - Initial progress update pushed")
     debug_print("Worker - Progress update pushed to queue")
+
+    if next_job.lora_model and next_job.lora_model != "None":
+        lora_file = os.path.join(lora_path, next_job.lora_model)
+        debug_print(f"Loading LoRA from {lora_file}")
+        load_lora_to_transformer(transformer, lora_file, next_job.lora_weight)
 
     try:
         # Clean GPU
@@ -2257,7 +2296,7 @@ def worker(next_job):
             )
 
         # Text encoding
-        stream.output_queue.push(('progress', (None, "Text encoding...", make_progress_bar_html(0, "Step Progress"), "Processing...", make_progress_bar_html(0, "Job Progress"))))
+        stream.output_queue.push(('progress', (None, "Text encoding...", make_progress_bar_html(0, "Step Progress"), "Processing...")))
 
         if not high_vram:
             fake_diffusers_current_device(text_encoder, gpu)  # since we only encode one text - that is one model move and one encode, offload is same time consumption since it is also one load and one encode.
@@ -2274,7 +2313,7 @@ def worker(next_job):
         llama_vec_n, llama_attention_mask_n = crop_or_pad_yield_mask(llama_vec_n, length=512)
 
         # Processing input image
-        stream.output_queue.push(('progress', (None, "Image processing...", make_progress_bar_html(0, "Step Progress"), "Processing...", make_progress_bar_html(0, "Job Progress"))))
+        stream.output_queue.push(('progress', (None, "Image processing...", make_progress_bar_html(0, "Step Progress"), "Processing...")))
 
         # Handle text-to-video case
         if worker_input_image is None:
@@ -2295,7 +2334,7 @@ def worker(next_job):
         input_image_pt = input_image_pt.permute(2, 0, 1)[None, :, None]
 
         # VAE encoding
-        stream.output_queue.push(('progress', (None, "VAE encoding...", make_progress_bar_html(0, "Step Progress"), "Processing...", make_progress_bar_html(0, "Job Progress"))))
+        stream.output_queue.push(('progress', (None, "VAE encoding...", make_progress_bar_html(0, "Step Progress"), "Processing...")))
 
         if not high_vram:
             load_model_as_complete(vae, target_device=gpu)
@@ -2303,7 +2342,7 @@ def worker(next_job):
         start_latent = vae_encode(input_image_pt, vae)
 
         # CLIP Vision
-        stream.output_queue.push(('progress', (None, "CLIP Vision encoding...", make_progress_bar_html(0, "Step Progress"), "Processing...", make_progress_bar_html(0, "Job Progress"))))
+        stream.output_queue.push(('progress', (None, "CLIP Vision encoding...", make_progress_bar_html(0, "Step Progress"), "Processing...")))
 
         if not high_vram:
             load_model_as_complete(image_encoder, target_device=gpu)
@@ -2320,7 +2359,7 @@ def worker(next_job):
         image_encoder_last_hidden_state = image_encoder_last_hidden_state.to(transformer.dtype)
 
         # Sampling
-        stream.output_queue.push(('progress', (None, "Start sampling...", make_progress_bar_html(0, "Step Progress"), "Processing...", make_progress_bar_html(0, "Job Progress"))))
+        stream.output_queue.push(('progress', (None, "Start sampling...", make_progress_bar_html(0, "Step Progress"), "Processing...")))
 
         rnd = torch.Generator("cpu").manual_seed(worker_seed)
 
@@ -2365,15 +2404,16 @@ def worker(next_job):
                 job_percentage = int((current_time / worker_video_length) * 100)
                 job_type = "Image to Video" if next_job.image_path != "text2video" else "Text 2 Video"
                 job_desc = f"""Creating a {job_type} job for job name: {worker_job_name}<br>
-Prompt:        {worker_prompt}<br>
-Settings:      seed={worker_seed}, cfg scale={worker_gs}, teacache={worker_use_teacache}, mp4_crf={worker_mp4_crf}<br>
-Progress:      {current_time:.1f} second(s) of {worker_video_length} second video has been made so far<br>
-Output folder: {worker_outputs_folder}{worker_job_name}.mp4"""
+Prompt:          {worker_prompt}<br>
+Negative Prompt: {worker_n_prompt}<br>
+Settings:        seed={worker_seed}, cfg scale={worker_gs}, teacache={worker_use_teacache}, mp4_crf={worker_mp4_crf}<br>
+Progress = {job_percentage}%:   {current_time:.1f} second(s) of {worker_video_length} second video has been made so far<br>
+Output folder:   {worker_outputs_folder}{worker_job_name}.mp4"""
                 job_progress = make_progress_bar_html(job_percentage, f'Current Job Progress: {job_percentage}% complete')
                 
                 
 
-                stream.output_queue.push(('progress', (preview, step_desc, step_progress, job_desc, job_progress)))
+                stream.output_queue.push(('progress', (preview, step_desc, step_progress, job_desc)))
                 return
             indices = torch.arange(0, sum([1, 16, 2, 1, worker_latent_window_size])).unsqueeze(0)
             clean_latent_indices_start, clean_latent_4x_indices, clean_latent_2x_indices, clean_latent_1x_indices, latent_indices = indices.split([1, 16, 2, 1, worker_latent_window_size], dim=1)
@@ -2456,7 +2496,6 @@ Output folder: {worker_outputs_folder}{worker_job_name}.mp4"""
     completed_job = next_job
     stream.output_queue.push(('done', completed_job))
 
-# where was this          mp4_path = output_filename
 
 
 
@@ -2622,8 +2661,8 @@ def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=
                 
                 # Add black outline and text for both lines
                 for offset in [(-1,-1), (-1,1), (1,-1), (1,1)]:
-                    cv2.putText(thumb, text1, (x1+offset[0], y1+offset[1]), font, scale, (0,0,0), thickness+2, cv2.LINE_AA)
-                    cv2.putText(thumb, text2, (x2+offset[0], y2+offset[1]), font, scale, (0,0,0), thickness+2, cv2.LINE_AA)
+                    cv2.putText(thumb, text1, (x1+offset[0], y1+offset[1]), font, scale, (255,255,255), thickness+2, cv2.LINE_AA)
+                    cv2.putText(thumb, text2, (x2+offset[0], y2+offset[1]), font, scale, (255,255,255), thickness+2, cv2.LINE_AA)
                 
                 # Add colored text
                 cv2.putText(thumb, text1, (x1, y1), font, scale, status_color, thickness, cv2.LINE_AA)
@@ -2637,7 +2676,7 @@ def extract_thumb_from_processing_mp4(next_job, output_filename, job_percentage=
                 
                 # Add black outline
                 for offset in [(-1,-1), (-1,1), (1,-1), (1,1)]:
-                    cv2.putText(thumb, text, (x+offset[0], y+offset[1]), font, scale, (0,0,0), thickness+2, cv2.LINE_AA)
+                    cv2.putText(thumb, text, (x+offset[0], y+offset[1]), font, scale, (255,255,255), thickness+2, cv2.LINE_AA)
                 
                 # Add colored text
                 cv2.putText(thumb, text, (x, y), font, scale, status_color, thickness, cv2.LINE_AA)
@@ -2673,11 +2712,10 @@ def process():
         gr.update(interactive=False),     # start_button
         gr.update(interactive=True),      # abort_button
         None,          # preview_image
-        gr.update(visible=True, value=starting_image),     # still frame video
+        gr.update(visible=True, label="input image", value=starting_image),     # still frame video
         "",                               # progress_desc1
         "",                               # progress_bar1
         "",     # progress_desc2
-        "",                               # progress_bar2
         update_queue_display(),           # queue_display
         update_queue_table()              # queue_table
     )
@@ -2690,7 +2728,6 @@ def process():
     while True:
         try:
             flag, data = stream.output_queue.next()
-
             if flag == 'file':
                 output_filename, job_percentage = data
                 processing_jobs = [job for job in job_queue if job.status.lower() == "processing"]
@@ -2703,15 +2740,14 @@ def process():
                     gr.update(interactive=False),   # start_button
                     gr.update(interactive=True),    # abort_button
                     gr.update(),        # preview_image (File Output: visible)
-                    gr.update(visible=True, value=output_filename), # result_video
+                    gr.update(visible=True, label=f"Video Output {job_percentage} % complete", value=output_filename), # result_video
                     gr.update(),    # keep last step progress
                     gr.update(),       # keep last step progress bar
                     gr.update(),     # keep last job progress
-                    gr.update(),        # keep last job progress bar
                     update_queue_display(),         # queue_display
                     update_queue_table()           # queue_table
                 )
-                print(f"{BLUE}JOB NAME: {file_job.job_name}{RESET} -  {GREEN}Video: {output_filename}{RESET}  - {YELLOW}PROGRESS: {job_percentage} % done{RESET}")
+                print(f"{YELLOW}PROGRESS: {job_percentage} % done{RESET} - {BLUE}JOB NAME: {file_job.job_name}{RESET} -  {GREEN}Video: {output_filename}{RESET}")
                 if os.path.exists(temp_video_path):
                     try:
                         os.remove(temp_video_path)
@@ -2720,7 +2756,7 @@ def process():
           #=======================PROGRESS STAGE=============
 
             if flag == 'progress':
-                preview, step_desc, step_progress, job_desc, job_progress = data
+                preview, step_desc, step_progress, job_desc = data
                 yield (
                     gr.update(interactive=True),    # queue_button
                     gr.update(interactive=False),   # start_button
@@ -2729,10 +2765,9 @@ def process():
                     gr.update(),                    # leave result_video as is
                     step_desc,                      # progress_desc1
                     step_progress,                  # progress_bar1 
-                    job_desc, #causes flicker ?                     # progress_desc2 
-                    job_progress,                   # progress_bar2 
-                    update_queue_display(),         # queue_display
-                    update_queue_table()           # queue_table
+                    job_desc,                       # progress_desc2 
+                    gr.update(),                    # queue_display (no update)
+                    gr.update()                     # queue_table (no update)
                 )
 
         
@@ -2756,12 +2791,11 @@ def process():
                             gr.update(interactive=True),    # start_button
                             gr.update(interactive=False),   # abort_button
                             gr.update(visible=False),       # preview_image (Abort: hidden)
-                            gr.update(visible=False),       # result_video (Abort: hidden)
+                            gr.update(label=f"Video aborted {job_percentage}% complete"),       # result_video (Aborted)
                             "Job Aborted",                  # progress_desc1 (step progress)
 
                             "",                            # progress_bar1 (step progress)
                             "Processing stopped",          # progress_desc2 (job progress)
-                            "",                            # progress_bar2 (job progress)
                             update_queue_display(),         # queue_display
                             update_queue_table()           # queue_table
                         )
@@ -2780,6 +2814,7 @@ def process():
                 mp4_path = os.path.join(completed_job.outputs_folder if hasattr(completed_job, 'outputs_folder') else Config.OUTPUTS_FOLDER, f"{completed_job.job_name}.mp4")
                 extract_thumb_from_processing_mp4(completed_job, mp4_path)
                 mark_job_completed(completed_job)
+                print(f"{GREEN}100% COMPLETED{RESET} - {BLUE}JOB NAME: {file_job.job_name}{RESET}")
                 save_queue()
 
                 # Check for next pending job
@@ -2801,11 +2836,10 @@ def process():
                         gr.update(interactive=False),     # start_button
                         gr.update(interactive=True),      # abort_button
                         None,          # preview_image
-                        gr.update(visible=True, value=starting_image),  # still frame video
+                        gr.update(visible=True, label=f"input image", value=starting_image),  # still frame video
                         "",          # progress_desc1
                         "",          # progress_bar1
                         "",          # progress_desc2
-                        "",          # progress_bar2
                         update_queue_display(),           # queue_display
                         update_queue_table()             # queue_table
                     )
@@ -2824,7 +2858,6 @@ def process():
                         "No more pending jobs to process",  # progress_desc1 (step progress)
                         None,  # progress_bar1 (step progress)
                         "Job Finished Successfully",    # progress_desc2 (job progress)
-                        None,  # progress_bar2 (job progress)
                         update_queue_display(),        # queue_display
                         update_queue_table()         # queue_table
                     )
@@ -2847,9 +2880,12 @@ def end_process():
     )
     
 
-def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_name, use_teacache, gpu_memory, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_json, create_job_outputs_folder=None, create_job_history_folder=None, keep_temp_mp4=None, create_job_keep_completed_job=None):
+def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_name, use_teacache, gpu_memory, steps, cfg, gs, rs, mp4_crf, keep_temp_png, keep_temp_json, create_job_outputs_folder=None, create_job_history_folder=None, keep_temp_mp4=None, create_job_keep_completed_job=None, status="pending", lora_model="None", lora_weight=0.0, source_name=""):
     """Handle adding a new job to the queue"""
     try:
+        # Ensure lora_model is always a string
+        if not isinstance(lora_model, str):
+            lora_model = "None"
         debug_print("=== add_to_queue_handler input values ===")
         debug_print(f"input_image type: {type(input_image)}")
         debug_print(f"prompt type: {type(prompt)}")
@@ -2901,7 +2937,10 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
                 create_job_outputs_folder=create_job_outputs_folder,
                 create_job_history_folder=create_job_history_folder,
                 keep_temp_mp4=keep_temp_mp4,
-                create_job_keep_completed_job=create_job_keep_completed_job
+                create_job_keep_completed_job=create_job_keep_completed_job,
+                lora_model=lora_model,
+                lora_weight=lora_weight,
+                source_name=""
             )
             save_queue()
             return (
@@ -2915,13 +2954,13 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
             # Multiple images case
             original_job_name = job_name  # Store the original job name prefix
             for img_tuple in input_image:
-                input_image = np.array(Image.open(img_tuple[0]))  # Convert to numpy array
-                
+                original_basename = os.path.splitext(os.path.basename(img_tuple[0]))[0]
+                input_image_np = np.array(Image.open(img_tuple[0]))  # Convert to numpy array
                 # Add job for each image, using original job name prefix
                 job_name = add_to_queue(
                     prompt=prompt,
                     n_prompt=n_prompt,
-                    input_image=input_image,
+                    input_image=input_image_np, #dont know why the variable was change from input_image which always worked before dont see we if we alread have the basename we wanted
                     video_length=video_length,
                     seed=seed,
                     job_name=original_job_name,  # Use original prefix each time
@@ -2938,7 +2977,10 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
                     create_job_outputs_folder=create_job_outputs_folder,
                     create_job_history_folder=create_job_history_folder,
                     keep_temp_mp4=keep_temp_mp4,
-                    create_job_keep_completed_job=create_job_keep_completed_job
+                    create_job_keep_completed_job=create_job_keep_completed_job,
+                    lora_model=lora_model,
+                    lora_weight=lora_weight,
+                    source_name=original_basename
                 )
                 # Create thumbnail for the job
                 job = next((job for job in job_queue if job.job_name == job_name), None)
@@ -2947,13 +2989,13 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
                     save_queue()
         else:
             # Single image case
-            input_image = np.array(Image.open(input_image[0]))  # Convert to numpy array
-            
+            original_basename = os.path.splitext(os.path.basename(input_image[0]))[0]
+            input_image_np = np.array(Image.open(input_image[0]))  # Convert to numpy array
             # Add single image job
             job_name = add_to_queue(
                 prompt=prompt,
                 n_prompt=n_prompt,
-                input_image=input_image,
+                input_image=input_image_np,
                 video_length=video_length,
                 seed=seed,
                 job_name=job_name,
@@ -2970,9 +3012,12 @@ def add_to_queue_handler(input_image, prompt, n_prompt, video_length, seed, job_
                 create_job_outputs_folder=create_job_outputs_folder,
                 create_job_history_folder=create_job_history_folder,
                 keep_temp_mp4=keep_temp_mp4,
-                create_job_keep_completed_job=create_job_keep_completed_job
+                create_job_keep_completed_job=create_job_keep_completed_job,
+                lora_model=lora_model,
+                lora_weight=lora_weight,
+                source_name=original_basename
             )
-        
+
             job = next((job for job in job_queue if job.job_name == job_name), None)
             if job and job.image_path:
                 job.thumbnail = create_thumbnail(job, status_change=True)
@@ -3255,10 +3300,13 @@ def handle_queue_action(evt: gr.SelectData, filter_status):
         "",  # job_history_folder
         None,  # keep_temp_mp4
         None,  # keep_completed_job
+        "",   # lora_model placeholder
+        0.0,   # lora_weight placeholder
         "",  # job_name
         gr.update(visible=False),  # edit group visibility
         gr.update(),  # queue_table
-        gr.update()   # queue_display
+        gr.update(),  # queue_display
+        "all"         # filter_status
     )
 
     if evt.index is None or evt.value not in ["⏫️", "⬆️", "⬇️", "⏬️", "❌", "📋", "✎"]:
@@ -3282,46 +3330,54 @@ def handle_queue_action(evt: gr.SelectData, filter_status):
             table = update_queue_table()
         else:
             table = filter_queue_table(filter_status)
-        return *empty_values[:-2], table, update_queue_display(), filter_status
+        return *empty_values[:-3], table, update_queue_display(), filter_status
     elif button_clicked == "⬆️":
         move_job(job.job_name, 'up')
         if filter_status == "all":
             table = update_queue_table()
         else:
             table = filter_queue_table(filter_status)
-        return *empty_values[:-2], table, update_queue_display(), filter_status
+        return *empty_values[:-3], table, update_queue_display(), filter_status
     elif button_clicked == "⬇️":
         move_job(job.job_name, 'down')
         if filter_status == "all":
             table = update_queue_table()
         else:
             table = filter_queue_table(filter_status)
-        return *empty_values[:-2], table, update_queue_display(), filter_status
+        return *empty_values[:-3], table, update_queue_display(), filter_status
     elif button_clicked == "⏬️":
         move_job_to_bottom(job.job_name)
         if filter_status == "all":
             table = update_queue_table()
         else:
             table = filter_queue_table(filter_status)
-        return *empty_values[:-2], table, update_queue_display(), filter_status
+        return *empty_values[:-3], table, update_queue_display(), filter_status
     elif button_clicked == "❌":
         remove_job(job.job_name)
         if filter_status == "all":
             table = update_queue_table()
         else:
             table = filter_queue_table(filter_status)
-        return *empty_values[:-2], table, update_queue_display(), filter_status
+        return *empty_values[:-3], table, update_queue_display(), filter_status
     elif button_clicked == "📋":
         copy_job(job.job_name)
         if filter_status == "all":
             table = update_queue_table()
         else:
             table = filter_queue_table(filter_status)
-        return *empty_values[:-2], table, update_queue_display(), filter_status
+        return *empty_values[:-3], table, update_queue_display(), filter_status
     
     # Handle edit action
     elif button_clicked == "✎":
         if job.status in ["pending", "completed"]:
+            # LoRA dropdown logic (same as prepare_metadata_job_edit)
+            lora_value = str(getattr(job, "lora_model", Config.DEFAULT_LORA_MODEL))
+            lora_weight_value = float(getattr(job, "lora_weight", Config.DEFAULT_LORA_WEIGHT))
+            lora_choices_actual = lora_choices.copy()
+            lora_display_value = lora_value
+            if lora_value != "None" and lora_value not in lora_choices_actual:
+                lora_display_value = f"{lora_value} - missing"
+                lora_choices_actual = [lora_display_value] + lora_choices_actual
             return (
                 job.prompt,
                 job.n_prompt,
@@ -3340,6 +3396,8 @@ def handle_queue_action(evt: gr.SelectData, filter_status):
                 job.job_history_folder,
                 job.keep_temp_mp4,
                 job.keep_completed_job,
+                gr.update(value=lora_display_value, choices=lora_choices_actual, interactive=True),
+                gr.update(value=lora_weight_value, interactive=True),
                 job.job_name,
                 gr.update(visible=True),  # Show edit_job_group
                 filter_queue_table(filter_status),
@@ -3407,7 +3465,9 @@ def copy_job(job_name):
             outputs_folder=original_job.outputs_folder,
             job_history_folder=original_job.job_history_folder,
             keep_temp_mp4=original_job.keep_temp_mp4,
-            keep_completed_job=original_job.keep_completed_job
+            keep_completed_job=original_job.keep_completed_job,
+            lora_model=original_job.lora_model,
+            lora_weight=original_job.lora_weight
         )
         
         # Find the original job's index
@@ -3491,7 +3551,8 @@ css = make_progress_bar_css() + """
 
 def edit_job(
     job_name, prompt, n_prompt, video_length, seed, use_teacache, gpu_memory, steps, cfg, gs, rs,
-    mp4_crf, keep_temp_png, keep_temp_json, outputs_folder, job_history_folder, keep_temp_mp4, keep_completed_job
+    mp4_crf, keep_temp_png, keep_temp_json, outputs_folder, job_history_folder, keep_temp_mp4, keep_completed_job,
+    lora_model, lora_weight
 ):
     """Edit a job's parameters"""
     try:
@@ -3520,6 +3581,8 @@ def edit_job(
                 job.job_history_folder = job_history_folder
                 job.keep_temp_mp4 = keep_temp_mp4
                 job.keep_completed_job = keep_completed_job
+                job.lora_model = lora_model
+                job.lora_weight = lora_weight
             
                 # If job was completed, change to pending and move it
                 if job.status == "completed":
@@ -3793,15 +3856,15 @@ def enable_edit_button(file_path):
         debug_print(f"Error checking metadata: {str(e)}")
         return gr.update(interactive=False, value="Error reading file")
 
-def prepare_job_edit(file_path):
+def prepare_metadata_job_edit(file_path):
     """Save image to temp folder and read metadata"""
     import time
     if not file_path:
         return (
             gr.update(visible=False),  # edit_group
-            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, 
+            "", "", Config.DEFAULT_VIDEO_LENGTH, Config.DEFAULT_SEED, Config.DEFAULT_USE_TEACACHE, Config.DEFAULT_GPU_MEMORY, Config.DEFAULT_STEPS, Config.DEFAULT_CFG, Config.DEFAULT_GS, Config.DEFAULT_RS, Config.DEFAULT_MP4_CRF, Config.DEFAULT_KEEP_TEMP_PNG, Config.DEFAULT_KEEP_TEMP_JSON, 
             Config.OUTPUTS_FOLDER, Config.JOB_HISTORY_FOLDER, Config.KEEP_TEMP_MP4, 
-            Config.KEEP_COMPLETED_JOB, ""
+            Config.KEEP_COMPLETED_JOB, gr.update(value=Config.DEFAULT_LORA_MODEL, choices=lora_choices, interactive=True), Config.DEFAULT_LORA_WEIGHT, ""
         )
     try:
         # Create a copy of the file first to avoid race conditions
@@ -3834,9 +3897,9 @@ def prepare_job_edit(file_path):
                             os.remove(temp_input)
                         return (
                             gr.update(visible=False),  # edit_group
-                            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False, 
+                            "", "", Config.DEFAULT_VIDEO_LENGTH, Config.DEFAULT_SEED, Config.DEFAULT_USE_TEACACHE, Config.DEFAULT_GPU_MEMORY, Config.DEFAULT_STEPS, Config.DEFAULT_CFG, Config.DEFAULT_GS, Config.DEFAULT_RS, Config.DEFAULT_MP4_CRF, Config.DEFAULT_KEEP_TEMP_PNG, Config.DEFAULT_KEEP_TEMP_JSON, 
                             Config.OUTPUTS_FOLDER, Config.JOB_HISTORY_FOLDER, Config.KEEP_TEMP_MP4, 
-                            Config.KEEP_COMPLETED_JOB, ""
+                            Config.KEEP_COMPLETED_JOB, gr.update(value=Config.DEFAULT_LORA_MODEL, choices=lora_choices, interactive=True), gr.update(value=Config.DEFAULT_LORA_WEIGHT, interactive=True), ""
                         )
 
                     # Convert to RGB if needed and make a copy
@@ -3868,7 +3931,6 @@ def prepare_job_edit(file_path):
             if os.path.exists(temp_input):
                 os.remove(temp_input)
 
-        # Helper functions for safe type conversion
         def safe_float(val, default):
             try:
                 return float(str(val).strip())
@@ -3886,7 +3948,14 @@ def prepare_job_edit(file_path):
                 return val.lower() in ('true', 't', 'yes', 'y', '1')
             return bool(val) if val is not None else default
 
-        # Return values to populate edit frame
+        # LoRA dropdown logic
+        lora_value = str(metadata.get("lora_model", Config.DEFAULT_LORA_MODEL))
+        lora_weight_value = float(metadata.get("lora_weight", Config.DEFAULT_LORA_WEIGHT))
+        lora_choices_actual = lora_choices.copy()
+        lora_display_value = lora_value
+        if lora_value != "None" and lora_value not in lora_choices_actual:
+            lora_display_value = f"{lora_value} - missing"
+            lora_choices_actual = [lora_display_value] + lora_choices_actual
         return (
             gr.update(visible=True),  # edit_group
             str(metadata.get("prompt", "")),
@@ -3906,6 +3975,8 @@ def prepare_job_edit(file_path):
             Config.JOB_HISTORY_FOLDER,
             Config.KEEP_TEMP_MP4,
             Config.KEEP_COMPLETED_JOB,
+            gr.update(value=lora_display_value, choices=lora_choices_actual, interactive=True),
+            gr.update(value=lora_weight_value, interactive=True),
             str(metadata.get("job_name", ""))
         )
     except Exception as e:
@@ -3921,11 +3992,11 @@ def prepare_job_edit(file_path):
                 pass
         return (
             gr.update(visible=False),  # edit_group
-            "", "", 5.0, -1, True, 6.0, 25, 1.0, 10.0, 0.0, 16, False, False,
+            "", "", Config.DEFAULT_VIDEO_LENGTH, Config.DEFAULT_SEED, Config.DEFAULT_USE_TEACACHE, Config.DEFAULT_GPU_MEMORY, Config.DEFAULT_STEPS, Config.DEFAULT_CFG, Config.DEFAULT_GS, Config.DEFAULT_RS, Config.DEFAULT_MP4_CRF, Config.DEFAULT_KEEP_TEMP_PNG, Config.DEFAULT_KEEP_TEMP_JSON,
             Config.OUTPUTS_FOLDER, Config.JOB_HISTORY_FOLDER, Config.KEEP_TEMP_MP4,
-            Config.KEEP_COMPLETED_JOB, ""
+            Config.KEEP_COMPLETED_JOB, gr.update(value=Config.DEFAULT_LORA_MODEL, choices=lora_choices, interactive=True), Config.DEFAULT_LORA_WEIGHT, ""
         )
-    
+
 def save_loaded_job(
     prompt, n_prompt, video_length, seed, use_teacache, gpu_memory, steps, cfg, gs, rs, 
     mp4_crf, keep_temp_png, keep_temp_json, outputs_folder, job_history_folder, 
@@ -4003,6 +4074,35 @@ with block:
                     )
                     prompt = gr.Textbox(label="Prompt", value=Config.DEFAULT_PROMPT)
                     n_prompt = gr.Textbox(label="Negative Prompt", value=Config.DEFAULT_N_PROMPT, visible=True)
+
+
+                    lora_choices = ["None"]
+                    try:
+                        lora_path = os.path.join(os.getcwd(), "loras")
+                        if os.path.exists(lora_path):
+                            files = [f for f in os.listdir(lora_path) if f.endswith(".safetensors")]
+                            files.sort()
+                            lora_choices += files
+                    except Exception as e:
+                        pass
+
+                    lora_model = gr.Dropdown(
+                        label="LoRA Model",
+                        choices=lora_choices,
+                        value=Config.DEFAULT_LORA_MODEL,
+                        info="Select a LoRA .safetensors file to use (or None for no LoRA)"
+                    )
+                    lora_weight = gr.Slider(
+                        label="LoRA Strength",
+                        minimum=0,
+                        maximum=1.9,
+                        value=Config.DEFAULT_LORA_WEIGHT,
+                        step=0.01,
+                        info="Strength of the LoRA. 0 disables it."
+                    )
+
+
+                    
                     save_prompt_button = gr.Button("Save Prompt to Quick List")
 
                     quick_list = gr.Dropdown(
@@ -4044,7 +4144,7 @@ with block:
                     preview_image = gr.Image(label="Latents", visible=False)
                     progress_desc1 = gr.Markdown('', elem_classes=['no-generating-animation', 'progress-desc'], elem_id="progress_desc1")  # Job Step progress text
                     progress_bar1 = gr.HTML('', elem_classes=['no-generating-animation', 'progress-bar'], elem_id="progress_bar1")  # Job Step progress bar
-                    result_video = gr.Video(label="Video Output Display", autoplay=True, show_share_button=False, height=512, loop=True, visible=False)
+                    result_video = gr.Video(label="Video Output Display", autoplay=True, show_share_button=False, height=400, loop=True, visible=False)
                     progress_desc2 = gr.Markdown('', elem_classes=['no-generating-animation', 'progress-desc'], elem_id="progress_desc2")  # Job progress text
                     progress_bar2 = gr.HTML('', elem_classes=['no-generating-animation', 'progress-bar'], elem_id="progress_bar2")  # Job progress bar
 
@@ -4081,6 +4181,19 @@ with block:
                     cancel_edit_metadata_job_button = gr.Button("Cancel")
                 edit_metadata_job_prompt = gr.Textbox(label="Change Prompt")
                 edit_metadata_job_n_prompt = gr.Textbox(label="Change Negative Prompt")
+                edit_metadata_job_lora_model = gr.Dropdown(
+                    label="LoRA Model",
+                    choices=lora_choices,
+                    value=Config.DEFAULT_LORA_MODEL,  # This will be overwritten by the value from metadata if present
+                    info="Select a LoRA .safetensors file to use (or None for no LoRA)"
+                )
+                edit_metadata_job_lora_weight = gr.Slider(
+                    label="LoRA Strength",
+                    minimum=0,
+                    maximum=1.9,
+                    value=Config.DEFAULT_LORA_WEIGHT,
+                    step=0.01
+                )
                 edit_metadata_job_video_length = gr.Slider(label="Change Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
                 edit_metadata_job_seed = gr.Number(label="Change Seed", value=-1, precision=0)
                 edit_metadata_job_use_teacache = gr.Checkbox(label='Change Use TeaCache', value=True)
@@ -4106,6 +4219,19 @@ with block:
                     cancel_edit_job_button = gr.Button("Cancel")
                 edit_job_prompt = gr.Textbox(label="Change Prompt")
                 edit_job_n_prompt = gr.Textbox(label="Change Negative Prompt")
+                edit_job_lora_model = gr.Dropdown(
+                    label="LoRA Model",
+                    choices=lora_choices,
+                    value=Config.DEFAULT_LORA_MODEL,
+                    info="Select a LoRA .safetensors file to use (or None for no LoRA)"
+                )
+                edit_job_lora_weight = gr.Slider(
+                    label="LoRA Strength",
+                    minimum=0,
+                    maximum=1.9,
+                    value=Config.DEFAULT_LORA_WEIGHT,
+                    step=0.01
+                )
                 edit_job_video_length = gr.Slider(label="Change Video Length (Seconds)", minimum=1, maximum=120, value=5, step=0.1)
                 edit_job_seed = gr.Number(label="Change Seed", value=-1, precision=0)
                 edit_job_use_teacache = gr.Checkbox(label='Change Use TeaCache', value=True)
@@ -4553,6 +4679,8 @@ with block:
             edit_job_history_folder,
             edit_job_keep_temp_mp4,
             edit_job_keep_completed_job,
+            edit_job_lora_model,      # <-- added
+            edit_job_lora_weight,     # <-- added
             edit_job_name,
             edit_job_group,
             queue_table,
@@ -4576,14 +4704,14 @@ with block:
 
     # Show edit group and populate with metadata when edit button clicked
     edit_metadata_job_button.click(
-        fn=prepare_job_edit,
+        fn=prepare_metadata_job_edit,
         inputs=[load_metadata_job],
         outputs=[
             edit_metadata_job_group, edit_metadata_job_prompt, edit_metadata_job_n_prompt, edit_metadata_job_video_length, edit_metadata_job_seed,
             edit_metadata_job_use_teacache, edit_metadata_job_gpu_memory, edit_metadata_job_steps, edit_metadata_job_cfg, edit_metadata_job_gs,
             edit_metadata_job_rs, edit_metadata_job_mp4_crf, edit_metadata_job_keep_temp_png, edit_metadata_job_keep_temp_json,
             edit_metadata_job_outputs_folder, edit_metadata_job_history_folder, edit_metadata_job_keep_temp_mp4,
-            edit_metadata_job_keep_completed_job, edit_metadata_job_name
+            edit_metadata_job_keep_completed_job, edit_metadata_job_lora_model, edit_metadata_job_lora_weight, edit_metadata_job_name
         ]
     )
 
@@ -4645,7 +4773,9 @@ with block:
             edit_job_outputs_folder,
             edit_job_history_folder,
             edit_job_keep_temp_mp4,
-            edit_job_keep_completed_job
+            edit_job_keep_completed_job,
+            edit_job_lora_model,
+            edit_job_lora_weight
         ],
         outputs=[queue_table, queue_display, edit_job_group]
     )
@@ -4666,7 +4796,7 @@ with block:
             queue_button, start_button, abort_button,
             preview_image, result_video,
             progress_desc1, progress_bar1,
-            progress_desc2, progress_bar2,
+            progress_desc2,
             queue_display, queue_table
         ]
     )
@@ -4674,15 +4804,6 @@ with block:
         fn=end_process,
         outputs=[queue_table, queue_display, start_button, abort_button, queue_button]
     )
-
-
-
-
-
-
-
-
-
 
 
 
@@ -4696,7 +4817,8 @@ with block:
             create_job_outputs_folder,
             create_job_history_folder,
             settings_keep_temp_mp4,  # Use the actual Gradio component
-            create_job_keep_completed_job
+            create_job_keep_completed_job,
+            lora_model, lora_weight
         ],
         outputs=[queue_table, queue_display, queue_button]
     )
@@ -4711,7 +4833,6 @@ with block:
             "",                               # progress_desc1
             "",                               # progress_bar1
             "",                               # progress_desc2
-            "",                               # progress_bar2
             update_queue_display(),           # queue_display
             update_queue_table()              # queue_table
         ),
@@ -4719,7 +4840,7 @@ with block:
             queue_button, start_button, abort_button,
             preview_image, result_video,
             progress_desc1, progress_bar1,
-            progress_desc2, progress_bar2,
+            progress_desc2,
             queue_display, queue_table
         ]
     )
