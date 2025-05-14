@@ -2986,7 +2986,7 @@ def process():
                     gr.update(interactive=True),    # abort_button
                     gr.update(interactive=True),    # abort_delete_button
                     gr.update(),        # preview_image (File Output: visible)
-                    gr.update(visible=True, label=f"<b>Video Output {job_percentage} % complete</b>", value=output_filename), # result_video
+                    gr.update(visible=True, label=f"Video Output {job_percentage} % complete", value=output_filename), # result_video
                     gr.update(),    # keep last step progress
                     gr.update(),       # keep last step progress bar
                     gr.update(),     # keep last job progress
