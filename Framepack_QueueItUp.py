@@ -7,6 +7,28 @@ if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 import re
 os.environ['HF_HOME'] = os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './hf_download')))
+
+# Create necessary folders at startup
+def ensure_folders():
+    folders = {
+        'hf_download': os.path.join(os.path.dirname(__file__), 'hf_download'),
+        'loras': os.path.join(os.path.dirname(__file__), 'loras'),
+        'outputs': os.path.join(os.path.dirname(__file__), 'outputs'),
+        'job_history': os.path.join(os.path.dirname(__file__), 'job_history'),
+        'temp_queue_images': os.path.join(os.path.dirname(__file__), 'temp_queue_images')
+    }
+    
+    for name, path in folders.items():
+        try:
+            if not os.path.exists(path):
+                os.makedirs(path)
+                print(f"Created {name} folder: {path}")
+        except Exception as e:
+            print(f"Error creating {name} folder: {str(e)}")
+
+# Run folder creation at startup
+ensure_folders()
+
 from diffusers_helper.hf_login import login
 import json
 import traceback
@@ -21,6 +43,7 @@ import torch
 import traceback
 import einops
 import safetensors.torch as sf
+from safetensors.torch import load_file as load_safetensors
 import numpy as np
 import argparse
 import math
@@ -42,6 +65,46 @@ import shutil
 import cv2
 import subprocess
 
+# Check for ffmpeg and install if needed
+def ensure_ffmpeg():
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode == 0:
+            print("FFmpeg is already installed and available")
+            return True
+    except FileNotFoundError:
+        print("FFmpeg not found, attempting to install imageio_ffmpeg...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "imageio_ffmpeg"])
+            print("Successfully installed imageio_ffmpeg")
+            import imageio_ffmpeg
+            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+            if ffmpeg_path and os.path.exists(ffmpeg_path):
+                ffmpeg_dir = os.path.dirname(ffmpeg_path)
+                os.environ['PATH'] = ffmpeg_dir + os.pathsep + os.environ['PATH']
+                print(f"Added FFmpeg to PATH: {ffmpeg_dir}")
+                return True
+        except Exception as e:
+            print(f"Error installing imageio_ffmpeg: {str(e)}")
+            return False
+    return True
+
+# Run the check at startup
+ensure_ffmpeg()
+
+def ensure_peft():
+    try:
+        # try to import PEFT
+        from peft import PeftModel, PeftConfig
+        return PeftModel, PeftConfig
+    except ImportError:
+        # install it into this Python environment
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "peft"])
+        # now retry the import
+        from peft import PeftModel, PeftConfig
+        return PeftModel, PeftConfig
+
+PeftModel, PeftConfig = ensure_peft()
 
 # After imports, before other functions
 def is_model_downloaded(model_value):
@@ -92,6 +155,7 @@ def set_model_as_default(model_type, model_value):
             models['image_encoder']
         )
     except Exception as e:
+        alert_print(f"Error setting {model_type} as default: {str(e)}")
         return f"Error setting {model_type} as default: {str(e)}", None, None, None, None, None, None, None, None
 
 def set_all_models_as_default(transformer, text_encoder, text_encoder_2, tokenizer, tokenizer_2, vae, feature_extractor, image_encoder):
@@ -138,6 +202,7 @@ def set_all_models_as_default(transformer, text_encoder, text_encoder_2, tokeniz
             models['image_encoder']
         )
     except Exception as e:
+        alert_print(f"Error setting models as default: {str(e)}")
         return f"Error setting models as default: {str(e)}", None, None, None, None, None, None, None, None
 
 def restore_model_default(model_type):
@@ -179,6 +244,7 @@ def restore_model_default(model_type):
             models['image_encoder']
         )
     except Exception as e:
+        alert_print(f"Error restoring {model_type} default: {str(e)}")
         return f"Error restoring {model_type} default: {str(e)}", None, None, None, None, None, None, None, None
 
 
@@ -298,10 +364,7 @@ def download_model_from_huggingface(model_id):
 
 
 def load_lora_to_transformer(transformer, lora_path):
-    from safetensors.torch import load_file as load_safetensors
-    # Load the LoRA weights
     state_dict = load_safetensors(lora_path)
-    # Load the LoRA adapter without weight scaling
     transformer.load_lora_adapter(state_dict, network_alphas=None, adapter_name="lora")
     return transformer
 
@@ -820,7 +883,7 @@ class Config:
                     
                     setattr(instance, key, parsed_value)
                 except Exception as e:
-                    debug_print(f"Error loading {key}: {str(e)}, using default value: {default_value}")
+                    alert_print(f"Error loading {key}: {str(e)}, using default value: {default_value}")
                     setattr(instance, key, default_value)
                     section[key] = str(default_value)
                     save_settings(config)
@@ -847,7 +910,7 @@ class Config:
                         parsed_value = default_value
                     setattr(instance, key, parsed_value)
                 except Exception as e:
-                    debug_print(f"Error loading model setting {key}: {str(e)}, using default value: {default_value}")
+                    alert_print(f"Error loading model setting {key}: {str(e)}, using default value: {default_value}")
                     setattr(instance, key, default_value)
                     model_section[key] = str(default_value)
                     save_settings(config)
@@ -881,7 +944,7 @@ class Config:
                     
                     setattr(instance, key, parsed_value)
                 except Exception as e:
-                    debug_print(f"Error loading system setting {key}: {str(e)}, using default value: {default_value}")
+                    alert_print(f"Error loading system setting {key}: {str(e)}, using default value: {default_value}")
                     setattr(instance, key, default_value)
                     section[key] = str(default_value)
                     save_settings(config)
@@ -1169,7 +1232,7 @@ def save_queue():
             json.dump(jobs, f, indent=4)
         return True
     except Exception as e:
-        print(f"Error saving queue: {str(e)}")
+        alert_print(f"Error saving queue: {str(e)}")
         traceback.print_exc()
         return False
 
@@ -1189,10 +1252,10 @@ def load_queue():
                         with open(backup_file, 'r') as f:
                             jobs = json.load(f)
                     except:
-                        debug_print("Backup file also corrupted, starting with empty queue")
+                        alert_print("Backup file also corrupted, starting with empty queue")
                         jobs = []
                 else:
-                    debug_print("No backup file found, starting with empty queue")
+                    alert_print("No backup file found, starting with empty queue")
                     jobs = []
             
             # Clear existing queue and load valid jobs from file
@@ -2102,6 +2165,77 @@ def clean_up_temp_mp4png(job):
             
         except OSError as e:
             alert_print(f"Failed to rename {highest_fname} to {job_name}.mp4: {e}")
+    # Check if FFMPEG is installed and add metadata to the final MP4
+    try:
+        import subprocess
+        result = subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode == 0:
+            # FFMPEG is installed, add metadata
+            final_mp4 = os.path.join(Config.OUTPUTS_FOLDER, f"{job_name}.mp4")
+            temp_mp4 = os.path.join(Config.OUTPUTS_FOLDER, f"{job_name}_temp.mp4")
+            # List of (attribute, label) pairs for metadata and comment
+            fields = [
+                ("prompt", "Prompt"),
+                ("n_prompt", "Negative Prompt"),
+                ("seed", "Seed"),
+                ("job_name", "Job"),
+                ("video_length", "Length"),
+                ("steps", "Steps"),
+                ("cfg", "cfg"),
+                ("gs", "gs"),
+                ("rs", "rs"),
+                ("gpu_memory", "GPU Memory"),
+                ("use_teacache", "Use TeaCache"),
+                ("mp4_crf", "MP4 CRF"),
+                ("lora_model", "LoRA Model"),
+                ("lora_weight", "LoRA Weight"),
+                ("source_name", "Source Name")
+            ]
+
+            metadata = []
+            comment_lines = []
+
+            # Build both metadata and comment strings
+            for attr, label in fields:
+                if hasattr(job, attr):
+                    value = str(getattr(job, attr))
+                    # Add to ffmpeg metadata
+                    metadata.extend(['-metadata', f'{attr}={value}'])
+                    # Add to comment
+                    comment_lines.append(f"{label}: {value}")
+
+            # Add a multi-line summary to the comment field
+            if comment_lines:
+                comment_str = "\\n".join(comment_lines)  # Use \\n for newlines in ffmpeg
+                metadata.extend(['-metadata', f'comment={comment_str}'])
+
+            # Add metadata using ffmpeg
+            if metadata:
+                cmd = ['ffmpeg', '-i', final_mp4, '-c', 'copy'] + metadata + [temp_mp4]
+                try:
+                    if sys.platform.startswith('win'):
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
+                    else:
+                        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    
+                    if result.returncode == 0:
+                        # Replace original with metadata-enhanced version
+                        os.remove(final_mp4)
+                        os.rename(temp_mp4, final_mp4)
+                        debug_print("Successfully added metadata to output MP4")
+                    else:
+                        alert_print(f"Failed to add metadata to MP4: {result.stderr.decode()}")
+                        if os.path.exists(temp_mp4):
+                            os.remove(temp_mp4)
+                except Exception as e:
+                    alert_print(f"Error running ffmpeg: {str(e)}")
+                    if os.path.exists(temp_mp4):
+                        os.remove(temp_mp4)
+    except Exception as e:
+        alert_print(f"Error while trying to add metadata: {e}")
+        # Continue execution - metadata addition is optional
 
 
 def move_mp4_to_custom_output_folder(job):
@@ -2852,7 +2986,7 @@ def process():
                     gr.update(interactive=True),    # abort_button
                     gr.update(interactive=True),    # abort_delete_button
                     gr.update(),        # preview_image (File Output: visible)
-                    gr.update(visible=True, label=f"**Video Output {job_percentage} % complete**", value=output_filename), # result_video
+                    gr.update(visible=True, label=f"<b>Video Output {job_percentage} % complete</b>", value=output_filename), # result_video
                     gr.update(),    # keep last step progress
                     gr.update(),       # keep last step progress bar
                     gr.update(),     # keep last job progress
@@ -2864,7 +2998,7 @@ def process():
                     try:
                         os.remove(temp_video_path)
                     except Exception as e:
-                        debug_print(f"Error removing temp video file {temp_video_path}: {str(e)}")
+                        alert_print(f"Error removing temp video file {temp_video_path}: {str(e)}")
           #=======================PROGRESS STAGE=============
 
             if flag == 'progress':
@@ -3013,7 +3147,7 @@ def process():
                     return
 
         except Exception as e:
-            debug_print(f"Error in process loop: {str(e)}")
+            alert_print(f"Error in process loop: {str(e)}")
             return
 
 def abort_process():
@@ -3249,6 +3383,7 @@ def restore_model_default(model_type):
             models['image_encoder']
         )
     except Exception as e:
+        alert_print(f"Error restoring {model_type} default: {str(e)}")
         return f"Error restoring {model_type} default: {str(e)}", None, None, None, None, None, None, None, None
 
 
@@ -3841,6 +3976,7 @@ def save_system_settings(new_outputs_folder, new_job_history_folder, new_debug_m
         
         return "System settings saved and runtime values updated! New directories created if needed."
     except Exception as e:
+        alert_print(f"Error saving system settings: {str(e)}")
         return f"Error saving system settings: {str(e)}"
 
 def restore_system_settings():
@@ -3896,6 +4032,7 @@ def restore_system_settings():
             gr.update(value="System settings restored and runtime values updated! New directories created if needed when job is processed.")  # Use gr.update for Markdown
         )
     except Exception as e:
+        alert_print(f"Error restoring system settings: {str(e)}")
         return None, None, False, False, False, gr.update(value=f"Error restoring system settings: {str(e)}")
 
 
@@ -3945,6 +4082,7 @@ def set_all_models_as_default(transformer, text_encoder, text_encoder_2, tokeniz
             models['image_encoder']
         )
     except Exception as e:
+        alert_print(f"Error setting models as default: {str(e)}")
         return f"Error setting models as default: {str(e)}", None, None, None, None, None, None, None, None
 
 def restore_all_model_defaults():
@@ -3988,6 +4126,7 @@ def restore_all_model_defaults():
             models['image_encoder']
         )
     except Exception as e:
+        alert_print(f"Error restoring model defaults: {str(e)}")
         return f"Error restoring model defaults: {str(e)}", None, None, None, None, None, None, None, None
         
 
@@ -4008,7 +4147,7 @@ def enable_edit_metadata_button(file_path):
             
             return gr.update(interactive=True, value="view/edit then savejob settings")
     except Exception as e:
-        debug_print(f"Error checking metadata: {str(e)}")
+        alert_print(f"Error checking metadata: {str(e)}")
         return gr.update(interactive=False, value="Error reading file")
 def prepare_metadata_job_edit(file_path):
     """Save image to temp folder and read metadata"""
@@ -4106,7 +4245,7 @@ def prepare_metadata_job_edit(file_path):
             try:
                 pnginfo.add_text(key, str(value))
             except Exception as e:
-                debug_print(f"Error adding metadata key {key}: {str(e)}")
+                alert_print(f"Error adding metadata key {key}: {str(e)}")
                 continue
 
         try:
@@ -4121,12 +4260,14 @@ def prepare_metadata_job_edit(file_path):
             try:
                 return float(str(val).strip())
             except (ValueError, TypeError):
+                alert_print(f"Error converting {val} to float: {str(e)}")
                 return default
 
         def safe_int(val, default):
             try:
                 return int(float(str(val).strip()))
             except (ValueError, TypeError):
+                alert_print(f"Error converting {val} to int: {str(e)}")
                 return default
 
         def safe_bool(val, default=True):
@@ -4168,7 +4309,7 @@ def prepare_metadata_job_edit(file_path):
             safe_bool(metadata.get("keep_temp_json"), Config.DEFAULT_KEEP_TEMP_JSON) # keep_temp_json
         )
     except Exception as e:
-        debug_print(f"Error preparing job edit: {str(e)}")
+        alert_print(f"Error preparing job edit: {str(e)}")
         traceback.print_exc()
         # Clean up any temporary files
         for temp_file in ["temp_input.png", "meta_loaded_image.png"]:
