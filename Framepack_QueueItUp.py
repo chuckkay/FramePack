@@ -41,7 +41,7 @@ from diffusers_helper.bucket_tools import find_nearest_bucket
 import shutil
 import cv2
 import subprocess
-from peft import PeftModel, PeftConfig
+
 
 # After imports, before other functions
 def is_model_downloaded(model_value):
@@ -1645,7 +1645,7 @@ def update_queue_display():
 
             # Add job data to display
             if job.thumbnail:
-                caption = f"{job.prompt} \n Negative: {job.n_prompt}\nLength: {job.video_length}s\nGS: {job.gs}"
+                caption = f"{job.prompt} \n Negative: {job.n_prompt} \n Lora: {job.lora_model}\nLength: {job.video_length}s\nGS: {job.gs}"
                 queue_data.append((job.thumbnail, caption))
         
         return queue_data
@@ -1673,7 +1673,8 @@ def update_queue_table():
             img_md = ""
 
         # Use full prompt text without truncation
-        prompt_cell = f'<span style="white-space: normal; word-wrap: break-word; display: block; width: 100%;">{job.prompt}</span>'
+        prompt_cell = f'<span style="white-space: normal; word-wrap: break-word; display: block; width: 100%;">Prompt: {job.prompt}<br>Negative prompt: {job.n_prompt}<br>Lora Model: {job.lora_model}</span>'
+
 
         # Add edit button for pending jobs
         edit_button = "✎" if job.status in ["pending", "completed"] else ""
