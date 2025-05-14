@@ -297,15 +297,12 @@ def download_model_from_huggingface(model_id):
         return None
 
 
-def load_lora_to_transformer(transformer, lora_path, lora_weight=1.0):
+def load_lora_to_transformer(transformer, lora_path):
     from safetensors.torch import load_file as load_safetensors
     # Load the LoRA weights
     state_dict = load_safetensors(lora_path)
-    # Assume your transformer has a method to load LoRA (if not, you may need to adapt this)
+    # Load the LoRA adapter without weight scaling
     transformer.load_lora_adapter(state_dict, network_alphas=None, adapter_name="lora")
-    # Set the adapter scale (if supported)
-    if hasattr(transformer, "set_adapter_scale"):
-        transformer.set_adapter_scale("lora", lora_weight)
     return transformer
 
 
@@ -2373,7 +2370,7 @@ def worker(next_job):
     if next_job.lora_model and next_job.lora_model != "None":
         lora_file = os.path.join(lora_path, next_job.lora_model)
         debug_print(f"Loading LoRA from {lora_file}")
-        load_lora_to_transformer(transformer, lora_file, next_job.lora_weight)
+        load_lora_to_transformer(transformer, lora_file)
 
     try:
         # Clean GPU
